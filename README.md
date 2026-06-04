@@ -131,6 +131,33 @@ The practical TRL implementation uses:
 
 The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The prior-boost ablation is included in the release scripts and documented in the paper appendix.
 
+
+## Table 16 boost-prior ablation
+
+The code and notes for the TRL backbone-prior boost ablation are provided in:
+
+```text
+docs/table16_boost_ablation.md
+```
+
+This documents both parts of Table 16:
+
+- the 1D boost sweep at fixed `beta_perp = 4`, including the no-boost `c=0` case;
+- the joint `c x beta_perp` sweep showing that the prior boost and tube scale are not reducible to a single effective product.
+
+The relevant implementation is in:
+
+```text
+scripts/cifar100_all_methods_iclr.py
+```
+
+with the functions:
+
+```text
+boost_ablation(...)
+boost_betaperp_sweep_2d(...)
+```
+
 ## Reproducibility notes
 
 The paper experiments use multiple regimes:
