@@ -1245,9 +1245,7 @@ def boost_ablation(trl, model, base_val, test_loader, bn_loader_aug, cfg,
 #
 # Como rodar: cole esta funcao em cifar100_all_methods_iclr.py, ao lado de
 # boost_ablation(), e dispare com a flag TEMP (mesmo padrao da boost_ablation):
-#     cfg.run_boost_betaperp_sweep = True
 # Depois REVERTER:
-#     sed -i '/cfg.run_boost_betaperp_sweep = True/d' cifar100_all_methods_iclr.py
 #
 # Custo: ~1 spine + 9*3 = 27 amostragens em 1 checkpoint (seed 0). Barato,
 # porque spine e N0 NAO dependem de c nem de beta_perp (so a curvatura/HVPs
@@ -1268,198 +1266,99 @@ import numpy as np
 import torch
 
 
-def boost_betaperp_sweep_2d(cfg, model, laplace_ll, train_loader, val_loader,
-                            device="cuda", checkpoint_seed=0):
-    """Sweep conjunto (c, beta_perp) num unico checkpoint MAP.
-
-    Reutiliza a maquinaria da boost_ablation(): construcao de spine, base
-    transversa N0, montagem do prior block-isotropic e avaliacao. A unica
-    diferenca conceitual e que aqui o spine/N0 sao construidos UMA vez e
-    reutilizados em todas as celulas da grade.
+def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cfg,
+                            c_grid=(25.0, 50.0, 100.0),
+                            beta_grid=(2.0, 4.0, 8.0),
+                            seeds=(0,),
+                            n_samples=25, fix_bn_batches=25):
+    """Sweep conjunto (c, beta_perp). Adaptado de boost_ablation():
+    - c entra em inv_sqrt_prec (via prior_proj), recomputado 1x por c.
+    - beta_perp entra em trl.beta, no loop interno (nao mexe na spine nem no prior).
+    Spine e N construidos 1x (trl.build() ja rodou antes). Custo: |c|*|beta|*|seeds| predicts.
     """
+    import numpy as np, collections, torch
+    if not trl.spine:
+        raise RuntimeError("Spine vazia. Rode trl.build() antes do sweep.")
+    if "evals" not in trl.spine[0]:
+        raise RuntimeError("Spine sem 'evals'. Reconstrua o spine 1x apos editar build().")
 
-    # ---- grade geometrica (cai em cima da hipotese de cordilheira) ----------
-    C_GRID = [25, 50, 100]
-    BETA_GRID = [2.0, 4.0, 8.0]
-    N_SAMPLINGS = 3          # "3 amostragens" por celula (igual boost_ablation)
-    S = cfg.trl.n_samples    # mesmo budget de amostras posteriores (25)
+    rows = []
+    for c in c_grid:
+        prior_vec = build_trl_prior_from_laplace(base_val, model,
+                                                 boost_factor=c, boost_floor=5.0)
+        for cp in trl.spine:
+            N = cp["N"].to(DEVICE)
+            evals = cp["evals"].to(DEVICE)
+            prior_proj = torch.sum((N ** 2) * prior_vec.unsqueeze(1), dim=0)
+            prec = torch.clamp(evals + prior_proj, min=1e-6)
+            cp["inv_sqrt_prec"] = torch.rsqrt(prec).detach().cpu()
+            del N, evals, prior_proj, prec
+        cleanup()
 
-    # base_val do checkpoint (marglik da Laplace last-layer). seed0 ~ 4.9016.
-    base_val = float(laplace_ll.prior_precision.mean().item())  # [CONFIRM]
-    print(f"[sweep2d] checkpoint seed={checkpoint_seed}  base_val={base_val:.4f}")
+        for beta in beta_grid:
+            trl.beta = float(beta)
+            for seed in seeds:
+                np.random.seed(seed); torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+                probs, targets = trl.predict(loader=test_loader,
+                                             bn_loader_aug=bn_loader_aug,
+                                             n_samples=n_samples,
+                                             fix_bn_batches=fix_bn_batches)
+                acc, nll, ece, brier = calc_metrics(probs, targets, cfg.num_classes)
+                rows.append({"c": c, "beta": beta, "product": c * beta, "seed": seed,
+                             "acc": acc, "nll": nll, "ece": ece, "brier": brier})
+                print(f"[c={c:>6} beta={beta:>5} prod={c*beta:>6.0f} seed={seed}] "
+                      f"acc={acc:.4f} nll={nll:.4f} ece={ece:.4f} brier={brier:.4f}")
 
-    # ========================================================================
-    # 1) CONSTRUIR O TUBO UMA VEZ  (independe de c e de beta_perp)
-    #    - spine predictor-corrector
-    #    - base transversa N0 (HVPs/Lanczos) e autovalores de curvatura
-    #    Cole aqui EXATAMENTE o mesmo bloco de construcao que a sua
-    #    boost_ablation() usa ANTES de aplicar o boost; ele nao depende de c.
-    # ========================================================================
-    # spine, N0, curv_eigs = build_trl_spine_and_basis(cfg, model, ...)   # [CONFIRM]
-    spine, N0, curv_eigs = _build_trl_once(cfg, model, train_loader, device)
+    agg = collections.defaultdict(lambda: collections.defaultdict(list))
+    for r in rows:
+        for m in ("acc", "nll", "ece", "brier"):
+            agg[(r["c"], r["beta"])][m].append(r[m])
 
-    # ========================================================================
-    # 2) VARRER (c, beta_perp) SO NA AMOSTRAGEM
-    # ========================================================================
-    results = {}  # (c, beta) -> dict de metricas (mean/std sobre N_SAMPLINGS)
+    print(f"\n=== Sweep 2D (mean +/- std over {len(seeds)} seed(s)) -- grade ECE ===")
+    print("   c \\ beta |" + "".join(f"  {b:>6}" for b in beta_grid))
+    for c in c_grid:
+        line = f"   {c:>7} |"
+        for b in beta_grid:
+            v = np.array(agg[(c, b)]["ece"]); line += f"  {v.mean():.4f}"
+        print(line)
 
-    for c in C_GRID:
-        # prior block-isotropic: head = base_val ; backbone = max(c*base_val, 5)
-        backbone_prec = max(c * base_val, 5.0)
-        # prior_vec = build_trl_prior_from_laplace(model, head_prec=base_val,
-        #                                          backbone_prec=backbone_prec,
-        #                                          floor=5.0)               # [CONFIRM]
-        prior_vec = _build_block_prior(model, base_val, backbone_prec, device)
-
-        # L_perp depende de c (via prior projetado no subespaco), nao de beta.
-        # Monte o MESMO L_perp que o sampler usa, projetando prior_vec em N0:
-        #   prec_perp = curv_eigs + <prior projetado em N0>
-        #   L_perp    = 1/sqrt(prec_perp)        (inverse-sqrt, diagonal)
-        L_perp = _build_Lperp(curv_eigs, prior_vec, N0)                    # [CONFIRM]
-
-        for beta in BETA_GRID:
-            accs, nlls, eces, briers = [], [], [], []
-            for r in range(N_SAMPLINGS):
-                torch.manual_seed(1000 * checkpoint_seed + 100 * int(c) + r)
-                # amostrar S redes: theta = gamma_t + N0 @ (beta * L_perp * z)
-                preds = _sample_predict(cfg, model, spine, N0, L_perp,
-                                        beta_perp=beta, S=S,
-                                        loader=val_loader, device=device)  # [CONFIRM]
-                # FixBN ja deve estar embutido em _sample_predict (mesmo protocolo)
-                m = _eval_metrics(preds, val_loader)                       # [CONFIRM]
-                accs.append(m["acc"]); nlls.append(m["nll"])
-                eces.append(m["ece"]); briers.append(m["brier"])
-
-            results[(c, beta)] = dict(
-                product=c * beta,
-                acc=(np.mean(accs), np.std(accs)),
-                nll=(np.mean(nlls), np.std(nlls)),
-                ece=(np.mean(eces), np.std(eces)),
-                brier=(np.mean(briers), np.std(briers)),
-            )
-            mu = results[(c, beta)]
-            print(f"[sweep2d] c={c:>4}  beta={beta:>4}  prod={c*beta:>5.0f} | "
-                  f"ECE {mu['ece'][0]:.4f}+/-{mu['ece'][1]:.4f}  "
-                  f"NLL {mu['nll'][0]:.4f}  ACC {mu['acc'][0]:.4f}")
-
-    # ========================================================================
-    # 3) TABELA 2D + ANALISE DE CORDILHEIRA
-    # ========================================================================
-    _print_grid(results, C_GRID, BETA_GRID, metric="ece")
-    _ridge_analysis(results)
-
-    # CSV pra replotar / colar no paper
-    out_csv = os.path.join(cfg.out_dir, f"boost_betaperp_sweep_seed{checkpoint_seed}.csv")
-    with open(out_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["c", "beta_perp", "product",
-                    "acc_mean", "acc_std", "nll_mean", "nll_std",
-                    "ece_mean", "ece_std", "brier_mean", "brier_std"])
-        for (c, beta), m in results.items():
-            w.writerow([c, beta, m["product"],
-                        m["acc"][0], m["acc"][1], m["nll"][0], m["nll"][1],
-                        m["ece"][0], m["ece"][1], m["brier"][0], m["brier"][1]])
-    print(f"[sweep2d] CSV salvo em {out_csv}")
-    return results
-
-
-# ----------------------------------------------------------------------------
-# ANALISE: cordilheira vs pico conjunto
-# ----------------------------------------------------------------------------
-def _ridge_analysis(results):
-    """Agrupa celulas por produto c*beta. Se a dispersao DENTRO de cada grupo
-    de produto-igual << dispersao ENTRE produtos, o ECE e governado pelo
-    produto -> cordilheira (50 nao e especial). Se nao, ha pico conjunto."""
-    from collections import defaultdict
-    by_prod = defaultdict(list)
-    for (c, beta), m in results.items():
-        by_prod[m["product"]].append(((c, beta), m["ece"][0]))
-
-    print("\n[sweep2d] === analise de cordilheira (agrupado por c*beta) ===")
-    within_spreads = []
-    prod_means = []
+    by_prod = collections.defaultdict(list)
+    for (c, b), d in agg.items():
+        by_prod[c * b].append(((c, b), float(np.mean(d["ece"]))))
+    print("\n=== Cordilheira (agrupado por c*beta) ===")
+    within, prod_means = [], []
     for prod in sorted(by_prod):
-        cells = by_prod[prod]
-        eces = [e for _, e in cells]
+        cells = by_prod[prod]; eces = [e for _, e in cells]
         prod_means.append(np.mean(eces))
         if len(cells) > 1:
-            spread = max(eces) - min(eces)
-            within_spreads.append(spread)
-            cell_str = "  ".join(f"{c,b}->ECE {e:.4f}" for (c, b), e in cells)
-            print(f"  produto={prod:>5.0f} (n={len(cells)}): spread={spread:.4f} | {cell_str}")
+            spread = max(eces) - min(eces); within.append(spread)
+            cs = "  ".join(f"{cb}->ECE {e:.4f}" for cb, e in cells)
+            print(f"  produto={prod:>6.0f} (n={len(cells)}): spread={spread:.4f} | {cs}")
         else:
-            (c, b), e = cells[0]
-            print(f"  produto={prod:>5.0f} (n=1): {c,b}->ECE {e:.4f}")
-
-    across_spread = (max(prod_means) - min(prod_means)) if prod_means else 0.0
-    mean_within = np.mean(within_spreads) if within_spreads else float("nan")
-    print(f"\n  spread MEDIO dentro de produto-igual : {mean_within:.4f}")
-    print(f"  spread ENTRE produtos                : {across_spread:.4f}")
-    if within_spreads and mean_within < 0.3 * across_spread:
-        print("  --> CORDILHEIRA: ECE segue o produto c*beta; 50 nao e um pico isolado.")
-        print("      Acao: recuar o texto do F.5 de 'otimo agudo em c=50' para")
-        print("      'estrutura de dois blocos necessaria + 50 e operating point robusto'.")
+            cb, e = cells[0]
+            print(f"  produto={prod:>6.0f} (n=1): {cb}->ECE {e:.4f}")
+    across = (max(prod_means) - min(prod_means)) if prod_means else 0.0
+    mw = np.mean(within) if within else float("nan")
+    print(f"\n  spread MEDIO dentro de produto-igual : {mw:.4f}")
+    print(f"  spread ENTRE produtos                : {across:.4f}")
+    if within and mw < 0.3 * across:
+        print("  --> CORDILHEIRA: ECE segue o produto; 50 nao e pico isolado. Recuar texto do F.5.")
     else:
-        print("  --> PICO CONJUNTO provavel: (50,4) nao e reproduzido por produto igual.")
-        print("      Acao: o F.5 pode AFIRMAR otimo no plano (c,beta); paper fica mais forte.")
-        print("      (Cheque em especial se (25,8) colapsou: se sim, refuta multiplicatividade")
-        print("       pura e e a MELHOR evidencia a favor da estrutura de dois blocos.)")
+        print("  --> PICO CONJUNTO provavel: (50,4) nao reproduzido por produto igual. F.5 pode afirmar otimo.")
+        print("      (Cheque se (25,8) colapsou: se sim, refuta multiplicatividade -> evidencia PRO estrutura.)")
 
-
-def _print_grid(results, C_GRID, BETA_GRID, metric="ece"):
-    print(f"\n[sweep2d] === grade 2D ({metric.upper()}, menor=melhor) ===")
-    header = "   c \\ b |" + "".join(f"  beta={b:<5}" for b in BETA_GRID)
-    print(header)
-    print("   " + "-" * (len(header) - 3))
-    for c in C_GRID:
-        row = f"   {c:>4} |"
-        for b in BETA_GRID:
-            mu, sd = results[(c, b)][metric]
-            row += f"  {mu:.4f}    "
-        print(row)
-
-
-# ----------------------------------------------------------------------------
-# STUBS / hooks — substituir pelos do seu codigo (mesmos da boost_ablation)
-# ----------------------------------------------------------------------------
-def _build_trl_once(cfg, model, train_loader, device):
-    """[CONFIRM] Cole o bloco de construcao de spine + base transversa N0 que a
-    boost_ablation() ja usa (curvatura/HVPs/Lanczos + complemento stiff +
-    predictor-corrector). Deve devolver:
-        spine     : lista de checkpoints {gamma_t}
-        N0        : base transversa rank-k_perp (K x k_perp)  [transportada ao longo do spine]
-        curv_eigs : autovalores de curvatura nas k_perp direcoes (vetor k_perp)
-    Nada aqui depende de c nem de beta_perp."""
-    raise NotImplementedError("Cole o bloco de construcao do tubo da sua boost_ablation().")
-
-
-def _build_block_prior(model, head_prec, backbone_prec, device):
-    """[CONFIRM] Mesmo build_trl_prior_from_laplace: head (linear./fc.) recebe
-    head_prec; demais parametros recebem backbone_prec; floor ja aplicado em
-    backbone_prec = max(c*base_val, 5). Devolve vetor de precisao por parametro."""
-    raise NotImplementedError("Use seu build_trl_prior_from_laplace(...).")
-
-
-def _build_Lperp(curv_eigs, prior_vec, N0):
-    """[CONFIRM] Mesmo fator de amostragem transversa do sampler:
-        prec_perp = curv_eigs + (prior_vec projetado em N0)
-        L_perp    = 1/sqrt(prec_perp)   (diagonal, inverse-sqrt)
-    Importante: e AQUI que c entra (via prior_vec). beta_perp NAO entra aqui;
-    ele multiplica na amostragem (_sample_predict)."""
-    raise NotImplementedError("Monte L_perp como no sampler de Eq. (6).")
-
-
-def _sample_predict(cfg, model, spine, N0, L_perp, beta_perp, S, loader, device):
-    """[CONFIRM] Mesmo sampler de Eq.(6): por amostra, sorteia checkpoint t do
-    spine, z~N(0,I_kperp), theta = gamma_t + N0 @ (beta_perp * L_perp * z),
-    FixBN no mesmo protocolo, forward. Devolve probabilidades preditivas medias."""
-    raise NotImplementedError("Use o mesmo caminho de amostragem+FixBN da boost_ablation().")
-
-
-def _eval_metrics(preds, loader):
-    """[CONFIRM] Mesma funcao de avaliacao do paper: acc / nll / ece / brier."""
-    raise NotImplementedError("Use sua funcao de metricas (acc/nll/ece/brier).")
-
+    import csv, os
+    out_csv = os.path.join(getattr(cfg, "out_dir", "."), "boost_betaperp_sweep.csv")
+    with open(out_csv, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["c", "beta", "product", "seed", "acc", "nll", "ece", "brier"])
+        for r in rows:
+            w.writerow([r["c"], r["beta"], r["product"], r["seed"],
+                        r["acc"], r["nll"], r["ece"], r["brier"]])
+    print(f"\n[sweep2d] CSV salvo em {out_csv}")
+    return rows
 
 if __name__ == '__main__':
     args = parse_args()
