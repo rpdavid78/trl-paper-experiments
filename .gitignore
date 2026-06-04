@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# Data / outputs / checkpoints
+data/
+datasets/
+results/
+logs/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.pickle
+*.mat
+*.tar
+*.tar.gz
+*.zip
+
+# Large experiment outputs
+*.jsonl
+*.csv
+*.npy
+*.npz
+
+# LaTeX/build junk
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
