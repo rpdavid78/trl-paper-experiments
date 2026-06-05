@@ -69,7 +69,7 @@ These scripts reproduce the WideResNet-16-4 and VGG-11-BN architecture checks.
 python toy/toy_spine_single_vs_full.py
 ```
 
-Runs the toy experiments comparing a MAP-centered single checkpoint posterior with the full TRL spine.
+Runs the original toy experiment comparing a MAP-centered single-checkpoint posterior with the full TRL spine. This script is kept as a legacy diagnostic. The final Tables 3--5 are reproduced by `toy/rerun_toy_tables.py` and `toy/run_final_toy_tables.sh`; see the final toy-table reproduction notes below.
 
 ### Fine-tuning diagnostic
 
@@ -129,7 +129,7 @@ The practical TRL implementation uses:
 * validation-selected transverse scale,
 * and BatchNorm recalibration when applicable.
 
-The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The prior-boost ablation is included in the release scripts and documented in the paper appendix.
+The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The adopted main CIFAR-100 backbone prior-boost coefficient is `c=50`. It is not selected per seed or per dataset from test metrics. The Table 16 sweeps are post-hoc test-set sensitivity analyses: they show that the no-boost setting collapses, that the adopted `c=50` setting is well positioned among the swept values, and that the boost factor and tube scale do not reduce to a single effective product. The tube scale `beta_perp`, by contrast, is selected on a held-out clean validation split by validation NLL in the CIFAR-scale pipeline.
 
 
 ## Table 16 boost-prior ablation
@@ -158,6 +158,8 @@ boost_ablation(...)
 boost_betaperp_sweep_2d(...)
 ```
 
+The adopted main CIFAR-100 setting is `c=50`. Table 16 is a post-hoc test-set sensitivity analysis, not a test-set selection procedure for `c`.
+
 ## Reproducibility notes
 
 The paper experiments use multiple regimes:
@@ -171,6 +173,114 @@ The paper experiments use multiple regimes:
 7. TRL hyperparameter and implementation ablations.
 
 Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, TRL rank, spine length, tube scale, FixBN batches, and output paths.
+
+## Final toy-table reproduction notes
+
+The final toy Tables 3--5 are reproduced by the consolidated toy runner:
+
+```text
+toy/rerun_toy_tables.py
+toy/run_final_toy_tables.sh
+```
+
+The older `toy/toy_spine_single_vs_full.py` is retained as a legacy original spine diagnostic; it is not the final Tables 3--5 protocol.
+
+In the toy experiments, ELA and LLA use full-network/full-Hessian Laplace approximations with prior precision optimized by marginal likelihood via `optimize_prior_precision(method="marglik")`. In the CIFAR-scale experiments, ELA and LLA are last-layer KFAC/KRON approximations for scalability.
+
+TRL tube scales in the toys are fixed/adopted for the final toy protocol rather than validation-selected inside `rerun_toy_tables.py`: `beta_perp=0.005` for sine regression and `beta_perp=0.05` for two-moons. This differs from CIFAR-scale, where `beta_perp` is selected by validation NLL.
+
+### Table 3: sine regression
+
+Final protocol:
+
+```text
+sine noise_std = 0.15
+seeds = 0--29
+```
+
+Command:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+  --task sine \
+  --out-dir /mnt/hd2/rpdavid/results_sine_noise015_30seeds_final \
+  --seeds $(seq 0 29) \
+  --sine-noise 0.15 \
+  2>&1 | tee /mnt/hd2/rpdavid/results_sine_noise015_30seeds_final.log
+```
+
+Important note: the default `--sine-noise` value in `rerun_toy_tables.py` is `0.3`; the final Table 3 numbers require the explicit `--sine-noise 0.15` flag shown above. Predictive NLL is computed with posterior functional variance plus observation variance `0.15^2`, applied identically to ELA, LLA, and TRL.
+
+### Table 4: two-moons classification
+
+Final protocol:
+
+```text
+two-moons noise = 0.30
+n_train = 500
+n_test = 1000
+hidden = 16
+seeds = 0--9
+samples = 250
+TRL: T=50, step_size=0.08, beta_perp=0.05, k=30
+```
+
+Command:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+  --task two_moons \
+  --out-dir /mnt/hd2/rpdavid/results_twomoons_noise03_500_1000_h16_10seeds_final \
+  --seeds 0 1 2 3 4 5 6 7 8 9 \
+  --samples 250 \
+  --moons-noise 0.30 \
+  --moons-epochs 3000 \
+  --moons-n-train 500 \
+  --moons-n-test 1000 \
+  --moons-hidden 16 \
+  --moons-trl-steps 50 \
+  --moons-trl-step-size 0.08 \
+  --moons-trl-perp-scale 0.05 \
+  --moons-trl-k 30 \
+  2>&1 | tee /mnt/hd2/rpdavid/results_twomoons_noise03_500_1000_h16_10seeds_final.log
+```
+
+### Table 5: spine isolation
+
+Final same-protocol paired diagnostic:
+
+```text
+sine noise_std = 0.15
+two-moons noise = 0.30
+two-moons n_train = 500
+two-moons n_test = 1000
+two-moons hidden = 16
+seeds = 0--9
+samples = 250
+```
+
+Command:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+  --task all \
+  --out-dir /mnt/hd2/rpdavid/results_table5_spine_isolation_final_10seeds \
+  --seeds 0 1 2 3 4 5 6 7 8 9 \
+  --samples 250 \
+  --sine-noise 0.15 \
+  --moons-noise 0.30 \
+  --moons-epochs 3000 \
+  --moons-n-train 500 \
+  --moons-n-test 1000 \
+  --moons-hidden 16 \
+  --moons-trl-steps 50 \
+  --moons-trl-step-size 0.08 \
+  --moons-trl-perp-scale 0.05 \
+  --moons-trl-k 30 \
+  2>&1 | tee /mnt/hd2/rpdavid/results_table5_spine_isolation_final_10seeds.log
+```
+
+Interpretation: Table 3 shows that TRL improves over LLA in both RMSE and NLL on sine regression. Table 5 isolates the spine contribution: on sine regression, the full spine substantially improves NLL and increases functional variation while RMSE remains comparable; on two-moons, full-spine and single-checkpoint are nearly tied, indicating that most of the gain in that classification regime comes from the transverse subspace.
 
 ## Not included
 
