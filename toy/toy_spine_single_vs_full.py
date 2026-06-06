@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Toy diagnostic: TRL single-checkpoint (T_eff=0) vs TRL full-spine.
+Legacy toy diagnostic: TRL single-checkpoint (T_eff=0) vs TRL full-spine.
 
 This script is intentionally self-contained. It builds low-loss spines for two
 small toy tasks using a full-network Hessian, then compares posterior predictive
@@ -8,8 +8,8 @@ sampling from:
   1) a single checkpoint around the MAP endpoint, and
   2) a uniform mixture over the stored spine points.
 
-The goal is to isolate whether the longitudinal spine contributes in regimes
-where full-Hessian toy geometry is tractable.
+This is the original toy-spine diagnostic. The final paper Tables 3--5 are
+reproduced by toy/rerun_toy_tables.py and toy/run_final_toy_tables.sh.
 """
 
 import argparse
@@ -470,7 +470,7 @@ def main():
         args.n_pred_samples = min(args.n_pred_samples, 50)
     else:
         configs = {
-            # Matches the selected toy hyperparameters reported in Appendix C.
+            # Legacy fixed toy-spine diagnostic configuration.
             "sine": ToyConfig("sine", 1, 1, T=30, step_size=0.02, beta=0.005, k=30, train_steps=3000, hessian_refresh=10, correct_steps=30, correct_lr=0.05),
             "moons": ToyConfig("moons", 2, 2, T=50, step_size=0.08, beta=0.05, k=30, train_steps=3000, hessian_refresh=10, correct_steps=30, correct_lr=0.05),
         }
