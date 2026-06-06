@@ -103,7 +103,7 @@ class CFG:
     # SWAG
     swag_epochs: int = 10
     swag_lr: float = 1e-3
-    swag_samples: int = 20
+    swag_samples: int = 25
     swag_sample_scale: float = 1.0
     swag_collect_momentum: float = 0.9
     swag_collect_alpha: float = 0.1
