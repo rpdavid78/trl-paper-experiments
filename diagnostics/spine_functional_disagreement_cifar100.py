@@ -20,7 +20,7 @@ try:
 except ModuleNotFoundError as e:
     raise SystemExit(
         "Could not import cifar100_all_methods_iclr. Set PYTHONPATH to include the code directory, e.g.\n"
-        "export PYTHONPATH=/mnt/hd2/rpdavid/trl_export/code:/home/rpdavid/projects/trl_iclr_code/trl_iclr_code/scripts:$PYTHONPATH"
+        "export PYTHONPATH=.:./scripts:$PYTHONPATH"
     ) from e
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -157,8 +157,8 @@ def set_model_to_theta(model, map_state_cpu, theta_cpu):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
-    ap.add_argument("--ckpt-root", type=str, default="/mnt/hd2/rpdavid/trl_checkpoints")
-    ap.add_argument("--out-dir", type=str, default="/mnt/hd2/rpdavid/trl_results/spine_functional_disagreement")
+    ap.add_argument("--ckpt-root", type=str, default="checkpoints")
+    ap.add_argument("--out-dir", type=str, default="results/spine_functional_disagreement")
     ap.add_argument("--data-root", type=str, default="./data")
     ap.add_argument("--batch-size", type=int, default=128)
     ap.add_argument("--num-workers", type=int, default=2)

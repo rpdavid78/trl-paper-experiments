@@ -20,10 +20,10 @@ Key fixes relative to the notebook:
 
 Example:
 
-  source /mnt/hd2/rpdavid/envs/trl-iclr/bin/activate
-  cd /mnt/hd2/rpdavid
+  source .venv/bin/activate
+  cd .
   python rerun_toy_tables.py \
-    --out-dir /mnt/hd2/rpdavid/results_toy_tables_rerun \
+    --out-dir ./results_toy_tables_rerun \
     --seeds 0 1 2 3 4 5 6 7 8 9
 
 For a quick smoke test:

@@ -10,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean, stdev
 
-ROOT = Path("/mnt/hd2/rpdavid/trl_results")
+ROOT = Path("results")
 OUT = ROOT / "paper_assets"
 TABLES = OUT / "tables"
 FIGS = OUT / "figures"

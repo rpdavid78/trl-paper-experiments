@@ -19,7 +19,7 @@
 #
 # Uso (servidor, env trl-iclr, do dir que contém o pacote):
 #   python trl_ggn_ab.py --arch resnet18 --seed 0 \
-#       --ckpt-dir /mnt/hd2/rpdavid/results_article_trl/checkpoints_resnet18_seed0 \
+#       --ckpt-dir results/checkpoints_resnet18_seed0 \
 #       --experiments base sel_ggn
 #
 # Recomendo: base + sel_ggn primeiro (efeito da SELEÇÃO é o que pode mexer).
