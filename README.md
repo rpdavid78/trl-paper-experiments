@@ -129,7 +129,7 @@ The practical TRL implementation uses:
 * validation-selected transverse scale,
 * and BatchNorm recalibration when applicable.
 
-The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The adopted main CIFAR-100 backbone prior-boost coefficient is `c=50`. It is not selected per seed or per dataset from test metrics. The Table 16 sweeps are post-hoc test-set sensitivity analyses: they show that the no-boost setting collapses, that the adopted `c=50` setting is well positioned among the swept values, and that the boost factor and tube scale do not reduce to a single effective product. The tube scale `beta_perp`, by contrast, is selected on a held-out clean validation split by validation NLL in the CIFAR-scale pipeline.
+The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The backbone prior-boost coefficient `c=50` is selected on a held-out clean validation split by validation NLL from a small sweep over `c`, and is then confirmed on the test split. The tube scale `beta_perp` is likewise selected on the held-out clean validation split by validation NLL in the CIFAR-scale pipeline. The Table 16 sweeps report both validation and test sensitivity for the boost, showing that the no-boost setting collapses and that the boost factor and tube scale do not reduce to a single effective product.
 
 
 ## Table 16 boost-prior ablation
@@ -142,7 +142,7 @@ docs/table16_boost_ablation.md
 
 This documents both parts of Table 16:
 
-- the 1D boost sweep at fixed `beta_perp = 4`, including the no-boost `c=0` case;
+- the 1D boost sweep at fixed validation-selected `beta_perp = 4`, including validation and test NLL/ECE and the no-boost `c=0` case;
 - the joint `c x beta_perp` sweep showing that the prior boost and tube scale are not reducible to a single effective product.
 
 The relevant implementation is in:
@@ -158,7 +158,7 @@ boost_ablation(...)
 boost_betaperp_sweep_2d(...)
 ```
 
-The adopted main CIFAR-100 setting is `c=50`. Table 16 is a post-hoc test-set sensitivity analysis, not a test-set selection procedure for `c`.
+For Panel A, `c=50` is selected by validation NLL on the held-out clean validation split and confirmed on the test split; it is not selected from test metrics. Panel B is a sensitivity analysis demonstrating that `c` and `beta_perp` do not collapse to a single effective product.
 
 ## Reproducibility notes
 
