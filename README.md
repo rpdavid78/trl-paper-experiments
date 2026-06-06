@@ -201,12 +201,12 @@ seeds = 0--29
 Command:
 
 ```bash
-CUDA_VISIBLE_DEVICES=1 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+CUDA_VISIBLE_DEVICES=1 python toy/rerun_toy_tables.py \
   --task sine \
-  --out-dir /mnt/hd2/rpdavid/results_sine_noise015_30seeds_final \
+  --out-dir results/results_sine_noise015_30seeds_final \
   --seeds $(seq 0 29) \
   --sine-noise 0.15 \
-  2>&1 | tee /mnt/hd2/rpdavid/results_sine_noise015_30seeds_final.log
+  2>&1 | tee results_sine_noise015_30seeds_final.log
 ```
 
 Important note: the default `--sine-noise` value in `rerun_toy_tables.py` is `0.3`; the final Table 3 numbers require the explicit `--sine-noise 0.15` flag shown above. Predictive NLL is computed with posterior functional variance plus observation variance `0.15^2`, applied identically to ELA, LLA, and TRL.
@@ -228,9 +228,9 @@ TRL: T=50, step_size=0.08, beta_perp=0.05, k=30
 Command:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+CUDA_VISIBLE_DEVICES=0 python toy/rerun_toy_tables.py \
   --task two_moons \
-  --out-dir /mnt/hd2/rpdavid/results_twomoons_noise03_500_1000_h16_10seeds_final \
+  --out-dir results/results_twomoons_noise03_500_1000_h16_10seeds_final \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --samples 250 \
   --moons-noise 0.30 \
@@ -242,7 +242,7 @@ CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
   --moons-trl-step-size 0.08 \
   --moons-trl-perp-scale 0.05 \
   --moons-trl-k 30 \
-  2>&1 | tee /mnt/hd2/rpdavid/results_twomoons_noise03_500_1000_h16_10seeds_final.log
+  2>&1 | tee results_twomoons_noise03_500_1000_h16_10seeds_final.log
 ```
 
 ### Table 5: spine isolation
@@ -262,9 +262,9 @@ samples = 250
 Command:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
+CUDA_VISIBLE_DEVICES=0 python toy/rerun_toy_tables.py \
   --task all \
-  --out-dir /mnt/hd2/rpdavid/results_table5_spine_isolation_final_10seeds \
+  --out-dir results/results_table5_spine_isolation_final_10seeds \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --samples 250 \
   --sine-noise 0.15 \
@@ -277,7 +277,7 @@ CUDA_VISIBLE_DEVICES=0 python /mnt/hd2/rpdavid/rerun_toy_tables.py \
   --moons-trl-step-size 0.08 \
   --moons-trl-perp-scale 0.05 \
   --moons-trl-k 30 \
-  2>&1 | tee /mnt/hd2/rpdavid/results_table5_spine_isolation_final_10seeds.log
+  2>&1 | tee results_table5_spine_isolation_final_10seeds.log
 ```
 
 Interpretation: Table 3 shows that TRL improves over LLA in both RMSE and NLL on sine regression. Table 5 isolates the spine contribution: on sine regression, the full spine substantially improves NLL and increases functional variation while RMSE remains comparable; on two-moons, full-spine and single-checkpoint are nearly tied, indicating that most of the gain in that classification regime comes from the transverse subspace.
