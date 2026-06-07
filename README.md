@@ -29,6 +29,9 @@ phase1_prereg/
 assets/
   Small figure assets used in the paper.
 
+docs/
+  Notes for paper tables and ablation protocols.
+
 requirements.txt
   Minimal Python dependency list.
 
@@ -97,15 +100,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-The experiments were run with PyTorch, torchvision, scipy, scikit-learn, pandas, matplotlib, and laplace-torch.
-
-GPU execution is recommended for all CIFAR-scale experiments.
+The experiments were run with PyTorch, torchvision, scipy, scikit-learn, pandas, matplotlib, and laplace-torch. GPU execution is recommended for all CIFAR-scale experiments.
 
 ## Data
 
-The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, and CIFAR-100-C. Dataset downloads are handled by the scripts or expected to be placed in a local data directory.
-
-Large datasets are not included in this repository.
+The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, and CIFAR-100-C. Dataset downloads are handled by the scripts or expected to be placed in a local data directory. Large datasets are not included in this repository.
 
 ## Checkpoints and results
 
@@ -131,6 +130,23 @@ The practical TRL implementation uses:
 
 The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The backbone prior-boost coefficient `c=50` is selected on a held-out clean validation split by validation NLL from a small sweep over `c`, and is then confirmed on the test split. The tube scale `beta_perp` is likewise selected on the held-out clean validation split by validation NLL in the CIFAR-scale pipeline. The Table 16 sweeps report both validation and test sensitivity for the boost, showing that the no-boost setting collapses and that the boost factor and tube scale do not reduce to a single effective product.
 
+## Table 14 tube-scale sensitivity rerun
+
+The final Table 14 / Figure 9 tube-scale sensitivity values are documented in:
+
+```text
+docs/tube_scale_sameood_rerun.md
+```
+
+This note records the rerun using the same test/OOD evaluation path as the other CIFAR-100 ablations. The final sweep uses:
+
+```text
+beta_perp in {2.0, 3.0, 4.0, 6.0, 10.0, 20.0}
+seed in {0, 1, 2}
+k_perp = 30, T = 40, step_size = 0.01, FixBN batches = 25, S = 25
+```
+
+For each `beta_perp`, the script is run with a single-value `--trl-tube-scales <beta_perp>` argument so that the reported row is the final test/OOD evaluation for that forced scale. The selected main scale remains `beta_perp = 4.0`, selected by validation NLL; it also gives the best ECE and Brier in this sweep.
 
 ## Table 16 boost-prior ablation
 
@@ -142,8 +158,8 @@ docs/table16_boost_ablation.md
 
 This documents both parts of Table 16:
 
-- the 1D boost sweep at fixed validation-selected `beta_perp = 4`, including validation and test NLL/ECE and the no-boost `c=0` case;
-- the joint `c x beta_perp` sweep showing that the prior boost and tube scale are not reducible to a single effective product.
+* the 1D boost sweep at fixed validation-selected `beta_perp = 4`, including validation and test NLL/ECE and the no-boost `c=0` case;
+* the joint `c x beta_perp` sweep showing that the prior boost and tube scale are not reducible to a single effective product.
 
 The relevant implementation is in:
 
