@@ -44,8 +44,7 @@ The spine and transverse basis are built once. The prior boost changes the proje
 Do not leave temporary hardcoded triggers such as:
 
 ```python
-cfg.run_boost_ablation = True
-cfg.run_boost_betaperp_sweep = True
+Enable the two boost-ablation hooks only in a local experimental copy; they are disabled by default in the released script.
 ```
 
 in the released script. Use an explicit flag, a separate ablation entry point, or a documented local edit before launching the sweep.

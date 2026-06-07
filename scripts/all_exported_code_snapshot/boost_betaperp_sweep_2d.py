@@ -7,9 +7,9 @@
 #
 # Como rodar: cole esta funcao em cifar100_all_methods_iclr.py, ao lado de
 # boost_ablation(), e dispare com a flag TEMP (mesmo padrao da boost_ablation):
-#     cfg.run_boost_betaperp_sweep = True
+#     enable run_boost_betaperp_sweep in a local experimental copy
 # Depois REVERTER:
-#     sed -i '/cfg.run_boost_betaperp_sweep = True/d' cifar100_all_methods_iclr.py
+#     remove the temporary local hook after the sweep
 #
 # Custo: ~1 spine + 9*3 = 27 amostragens em 1 checkpoint (seed 0). Barato,
 # porque spine e N0 NAO dependem de c nem de beta_perp (so a curvatura/HVPs
