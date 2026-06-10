@@ -148,6 +148,16 @@ k_perp = 30, T = 40, step_size = 0.01, FixBN batches = 25, S = 25
 
 For each `beta_perp`, the script is run with a single-value `--trl-tube-scales <beta_perp>` argument so that the reported row is the final test/OOD evaluation for that forced scale. The selected main scale remains `beta_perp = 4.0`, selected by validation NLL; it also gives the best ECE and Brier in this sweep.
 
+## Random rank-30 full-network control
+
+The random full-network rank-30 diagnostic control used in the appendix text is documented in:
+
+```text
+docs/random_rank30_full_network_control.md
+```
+
+This control replaces the Fisher/GGN-selected TRL transverse subspace by a random rank-30 orthonormal full-network subspace, while keeping the block prior, FixBN protocol, `S=25`, and validation-selected tube scale unchanged. Across five random bases on one MAP checkpoint and one-basis controls on two additional MAP checkpoints, the random posterior stays MAP-like and selects the largest value in the original beta grid. A provenance-clean extension to `beta_perp=40` remains MAP-like and only weakly improves validation NLL, supporting the interpretation that the calibration gain comes from Fisher/GGN-selected transverse directions rather than from full-network access alone.
+
 ## Table 16 boost-prior ablation
 
 The code and notes for the TRL backbone-prior boost ablation are provided in:
@@ -198,136 +208,3 @@ The final toy Tables 3--5 are reproduced by the consolidated toy runner:
 toy/rerun_toy_tables.py
 toy/run_final_toy_tables.sh
 ```
-
-The older `toy/toy_spine_single_vs_full.py` is retained as a legacy original spine diagnostic; it is not the final Tables 3--5 protocol.
-
-In the toy experiments, ELA and LLA use full-network/full-Hessian Laplace approximations with prior precision optimized by marginal likelihood via `optimize_prior_precision(method="marglik")`. In the CIFAR-scale experiments, ELA and LLA are last-layer KFAC/KRON approximations for scalability.
-
-TRL tube scales in the toys are fixed/adopted for the final toy protocol rather than validation-selected inside `rerun_toy_tables.py`: `beta_perp=0.005` for sine regression and `beta_perp=0.05` for two-moons. This differs from CIFAR-scale, where `beta_perp` is selected by validation NLL.
-
-### Table 3: sine regression
-
-Final protocol:
-
-```text
-sine noise_std = 0.15
-seeds = 0--29
-```
-
-Command:
-
-```bash
-CUDA_VISIBLE_DEVICES=1 python toy/rerun_toy_tables.py \
-  --task sine \
-  --out-dir results/results_sine_noise015_30seeds_final \
-  --seeds $(seq 0 29) \
-  --sine-noise 0.15 \
-  2>&1 | tee results_sine_noise015_30seeds_final.log
-```
-
-Important note: the default `--sine-noise` value in `rerun_toy_tables.py` is `0.3`; the final Table 3 numbers require the explicit `--sine-noise 0.15` flag shown above. Predictive NLL is computed with posterior functional variance plus observation variance `0.15^2`, applied identically to ELA, LLA, and TRL.
-
-### Table 4: two-moons classification
-
-Final protocol:
-
-```text
-two-moons noise = 0.30
-n_train = 500
-n_test = 1000
-hidden = 16
-seeds = 0--9
-samples = 250
-TRL: T=50, step_size=0.08, beta_perp=0.05, k=30
-```
-
-Command:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python toy/rerun_toy_tables.py \
-  --task two_moons \
-  --out-dir results/results_twomoons_noise03_500_1000_h16_10seeds_final \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --samples 250 \
-  --moons-noise 0.30 \
-  --moons-epochs 3000 \
-  --moons-n-train 500 \
-  --moons-n-test 1000 \
-  --moons-hidden 16 \
-  --moons-trl-steps 50 \
-  --moons-trl-step-size 0.08 \
-  --moons-trl-perp-scale 0.05 \
-  --moons-trl-k 30 \
-  2>&1 | tee results_twomoons_noise03_500_1000_h16_10seeds_final.log
-```
-
-### Table 5: spine isolation
-
-Final same-protocol paired diagnostic:
-
-```text
-sine noise_std = 0.15
-two-moons noise = 0.30
-two-moons n_train = 500
-two-moons n_test = 1000
-two-moons hidden = 16
-seeds = 0--9
-samples = 250
-```
-
-Command:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python toy/rerun_toy_tables.py \
-  --task all \
-  --out-dir results/results_table5_spine_isolation_final_10seeds \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --samples 250 \
-  --sine-noise 0.15 \
-  --moons-noise 0.30 \
-  --moons-epochs 3000 \
-  --moons-n-train 500 \
-  --moons-n-test 1000 \
-  --moons-hidden 16 \
-  --moons-trl-steps 50 \
-  --moons-trl-step-size 0.08 \
-  --moons-trl-perp-scale 0.05 \
-  --moons-trl-k 30 \
-  2>&1 | tee results_table5_spine_isolation_final_10seeds.log
-```
-
-Interpretation: Table 3 shows that TRL improves over LLA in both RMSE and NLL on sine regression. Table 5 isolates the spine contribution: on sine regression, the full spine substantially improves NLL and increases functional variation while RMSE remains comparable; on two-moons, full-spine and single-checkpoint are nearly tied, indicating that most of the gain in that classification regime comes from the transverse subspace.
-
-## Not included
-
-The following are intentionally excluded:
-
-```text
-checkpoints/
-results/
-logs/
-datasets/
-*.pth
-*.pt
-*.jsonl
-*.csv
-*.tar.gz
-```
-
-These files can be large and are ignored by `.gitignore`.
-
-## Citation
-
-If you use this code, please cite the associated TRL paper.
-
-```bibtex
-@article{trl2026,
-  title   = {Tubular Riemannian Laplace Approximations for Bayesian Neural Networks},
-  author  = {Rodrigo Pereira David},
-  year    = {2026}
-}
-```
-
-## License
-
-See `LICENSE`.
