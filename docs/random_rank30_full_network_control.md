@@ -65,7 +65,7 @@ AUROC            0.8647 +/- 0.0128
 best_tube_scale  20.0000 +/- 0.0000
 ```
 
-All seven original-grid controls select `beta_perp=20` and remain MAP-like.
+All seven original-grid controls select `beta_perp=20` and remain MAP-like in NLL and calibration. MSP-AUROC overlaps the MAP and TRL ranges in the main CIFAR-100 table, consistent with AUROC being less sensitive than NLL/ECE to the calibration mechanism isolated by this diagnostic.
 
 ## Provenance-clean beta=40 extension
 
