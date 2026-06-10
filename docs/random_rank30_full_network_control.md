@@ -19,7 +19,7 @@ The control replaces the Fisher/GGN-selected TRL transverse subspace with a rand
 - validation-selected tube scale;
 - original scale grid `beta_perp in {2,3,4,6,10,20}` plus one provenance-clean extension to `beta_perp=40` for basis seed 9000 on MAP seed 0.
 
-The five-basis sweep is across random bases on a fixed MAP checkpoint, not an across-MAP-seed estimate. The two additional one-basis controls use separate MAP checkpoints.
+The random basis is built from i.i.d. Gaussian draws and orthonormalized by two modified Gram-Schmidt reorthogonalization passes in parameter space. The five-basis sweep is across random bases on a fixed MAP checkpoint, not an across-MAP-seed estimate. The two additional one-basis controls use separate MAP checkpoints.
 
 ## Clean controls
 
