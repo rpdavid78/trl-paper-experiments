@@ -16,3 +16,11 @@ This repository contains scripts and documentation for the TRL paper experiments
 
 Large checkpoints, raw result files, datasets, and logs are intentionally excluded.
 See `README.md` for original server paths and reproduction notes.
+
+## ImageNet / ResNet-50 scale-check
+
+- `scripts/imagenet_marglik_fit.py`: last-layer Laplace marginal-likelihood fit used to estimate `lambda_base`.
+- `scripts/imagenet_resnet50_scalecheck.py`: ImageNet / ResNet-50 TRL scale-check pipeline.
+- `docs/imagenet_resnet50_scalecheck.md`: protocol and reproduction notes for Appendix I.
+
+Large ImageNet datasets, checkpoints, cached bases, raw JSONL files, and generated result files are intentionally excluded.

@@ -208,3 +208,35 @@ The final toy Tables 3--5 are reproduced by the consolidated toy runner:
 toy/rerun_toy_tables.py
 toy/run_final_toy_tables.sh
 ```
+
+## ImageNet / ResNet-50 scale-check
+
+The ImageNet / ResNet-50 experiment is included as a scale-check, not as the main benchmark. It uses a fixed torchvision ResNet-50 pretrained checkpoint (`IMAGENET1K_V1`), ImageNet train batches for last-layer marglik, HVP, and FixBN, and a mechanical split of the official validation set into `val_tuning_25k` and `val_test_25k`.
+
+The protocol is documented in:
+
+```text
+docs/imagenet_resnet50_scalecheck.md
+Main scripts:
+
+```bash
+python scripts/imagenet_marglik_fit.py \
+  --train-root <imagenet_train_root> \
+  --out-dir results/imagenet_resnet50_scalecheck \
+  --seeds 0 1 2
+
+python scripts/imagenet_resnet50_scalecheck.py \
+  --train-root <imagenet_train_root> \
+  --val-root <imagenet_val_root> \
+  --out-dir results/imagenet_resnet50_scalecheck \
+  --seeds 0 1 2 \
+  --rank 30 \
+  --samples 25 \
+  --fixbn-batches 25 \
+  --hvp-batches 5 \
+  --boost-c 50 150 450 \
+  --betas 0.5 1 1.5 2 3 4 \
+  --spine-steps 0
+```
+
+Large ImageNet datasets, cached bases, raw JSONL files, checkpoints, and generated result files are not included in the release.
