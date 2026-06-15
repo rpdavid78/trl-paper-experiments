@@ -217,6 +217,8 @@ The protocol is documented in:
 
 ```text
 docs/imagenet_resnet50_scalecheck.md
+```
+
 Main scripts:
 
 ```bash
