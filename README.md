@@ -242,3 +242,15 @@ python scripts/imagenet_resnet50_scalecheck.py \
 ```
 
 Large ImageNet datasets, cached bases, raw JSONL files, checkpoints, and generated result files are not included in the release.
+
+## Random rank-30 subspace control
+
+The random rank-30 baseline is a negative control for the TRL transverse subspace. It tests whether a generic random low-rank subspace gives the same behavior as the TRL geometry-aware transverse subspace.
+
+Main script:
+
+```text
+scripts/cifar100_random_rank30_baseline.py
+```
+
+This is a diagnostic/control experiment, not a replacement for TRL.

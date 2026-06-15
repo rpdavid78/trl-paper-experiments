@@ -24,3 +24,7 @@ See `README.md` for original server paths and reproduction notes.
 - `docs/imagenet_resnet50_scalecheck.md`: protocol and reproduction notes for Appendix I.
 
 Large ImageNet datasets, checkpoints, cached bases, raw JSONL files, and generated result files are intentionally excluded.
+
+## Random rank-30 subspace control
+
+- `scripts/cifar100_random_rank30_baseline.py`: random low-rank subspace baseline used as a control against the TRL transverse subspace.
