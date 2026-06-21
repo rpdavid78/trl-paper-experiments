@@ -51,25 +51,3 @@ python scripts/imagenet_resnet50_scalecheck.py \
 `--spine-steps 0` is the single-checkpoint transverse scale-check. Positive `--spine-steps` values enable the optional post-hoc spine diagnostic.
 
 Large checkpoints, cached bases, raw JSONL result files, and datasets are not included in the release.
-EOF```
-
-Then run the ImageNet / ResNet-50 TRL scale-check:
-
-```bash
-python scripts/imagenet_resnet50_scalecheck.py \
-  --train-root <imagenet_train_root> \
-  --val-root <imagenet_val_root> \
-  --out-dir results/imagenet_resnet50_scalecheck \
-  --seeds 0 1 2 \
-  --rank 30 \
-  --samples 25 \
-  --fixbn-batches 25 \
-  --hvp-batches 5 \
-  --boost-c 50 150 450 \
-  --betas 0.5 1 1.5 2 3 4 \
-  --spine-steps 0
-```
-
-`--spine-steps 0` is the single-checkpoint transverse scale-check. Positive `--spine-steps` values enable the optional post-hoc spine diagnostic.
-
-Large checkpoints, cached bases, raw JSONL result files, and datasets are not included in the release.
