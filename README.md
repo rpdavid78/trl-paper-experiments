@@ -104,7 +104,7 @@ The experiments were run with PyTorch, torchvision, scipy, scikit-learn, pandas,
 
 ## Data
 
-The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, and CIFAR-100-C. Dataset downloads are handled by the scripts or expected to be placed in a local data directory. Large datasets are not included in this repository.
+The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, CIFAR-100-C, and ImageNet. Dataset downloads are handled by the scripts or expected to be placed in a local data directory. Large datasets, including ImageNet, are not included in this repository.
 
 ## Checkpoints and results
 
@@ -192,13 +192,14 @@ The paper experiments use multiple regimes:
 
 1. CIFAR-100 from scratch,
 2. CIFAR-100-C robustness,
-3. toy full-Hessian diagnostics,
-4. CIFAR-100 to CIFAR-10 few-shot fine-tuning,
-5. WideResNet-16-4 and VGG-11-BN architecture checks,
-6. spine functional-disagreement diagnostics,
-7. TRL hyperparameter and implementation ablations.
+3. ImageNet / ResNet-50 scale-check,
+4. toy full-Hessian diagnostics,
+5. CIFAR-100 to CIFAR-10 few-shot fine-tuning,
+6. WideResNet-16-4 and VGG-11-BN architecture checks,
+7. spine functional-disagreement diagnostics,
+8. TRL hyperparameter and implementation ablations.
 
-Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, TRL rank, spine length, tube scale, FixBN batches, and output paths.
+Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, ImageNet train/validation roots, TRL rank, spine length, tube scale, FixBN batches, and output paths.
 
 ## Final toy-table reproduction notes
 
