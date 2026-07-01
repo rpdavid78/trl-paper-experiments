@@ -2,14 +2,14 @@
 
 Experiment code release for **Tubular Riemannian Laplace (TRL)**, a post-hoc posterior approximation for Bayesian neural networks.
 
-This repository contains the code used for the CIFAR-100, CIFAR-100-C, ImageNet / ResNet-50 scale-check, toy, fine-tuning, architecture-sensitivity, and diagnostic experiments reported in the paper.
+This repository contains the code used for the CIFAR-100, CIFAR-100-C, ImageNet / ResNet-50 scale-check, toy, fine-tuning, architecture-sensitivity, calibration sanity-check, and diagnostic experiments reported in the paper.
 
 ## Repository structure
 
 ```text
 scripts/
   Main CIFAR-100 pipelines, architecture checks, CIFAR-100-C evaluation,
-  result aggregation, and paper-asset utilities.
+  calibration sanity checks, result aggregation, and paper-asset utilities.
 
 ablation_scripts/
   Sensitivity and ablation scripts for TRL hyperparameters and implementation choices.
@@ -30,7 +30,7 @@ assets/
   Small figure assets used in the paper.
 
 docs/
-  Notes for paper tables and ablation protocols.
+  Notes for paper tables, ablation protocols, and calibration sanity checks.
 
 requirements.txt
   Minimal Python dependency list.
@@ -56,6 +56,38 @@ python scripts/cifar100c_eval_iclr.py
 ```
 
 Evaluates trained methods on CIFAR-100-C corruptions and severities.
+
+### Calibration sanity checks
+
+The paper includes two reviewer-facing calibration controls for the CIFAR-100 clean benchmark: validation-NLL-tuned last-layer Laplace and MAP temperature scaling. These checks are documented in:
+
+```text
+docs/laplace_grid_temperature_scaling.md
+```
+
+Validation-NLL prior-grid check for ELA/LLA:
+
+```bash
+for s in 0 1 2; do
+  python scripts/cifar100_laplace_prior_grid_iclr.py \
+    --seed $s \
+    --ckpt-dir /path/to/checkpoints_c100_seed${s} \
+    --results results_iclr/cifar100_laplace_prior_grid.jsonl
+done
+```
+
+MAP temperature scaling:
+
+```bash
+for s in 0 1 2; do
+  python scripts/cifar100_temperature_scaling_iclr.py \
+    --seed $s \
+    --ckpt-dir /path/to/checkpoints_c100_seed${s} \
+    --results results_iclr/cifar100_temperature_scaling.jsonl
+done
+```
+
+The Laplace grid check gives ELA/LLA the same held-out validation-NLL prior-selection criterion used for TRL scale selection. In the reported CIFAR-100 runs, validation tuning selects the upper boundary of the default prior-precision grid (`lambda = 1e4`), making ELA-grid and LLA-grid MAP-like rather than producing a stronger non-degenerate last-layer posterior. Temperature scaling is a strong scalar calibration baseline: it closes the clean NLL/Brier gap to TRL within seed-to-seed variability, while TRL retains the robust ECE advantage and provides posterior samples plus functional-variance diagnostics.
 
 ### Architecture-sensitivity checks
 
@@ -115,18 +147,20 @@ The repository is intended to provide:
 * the experiment code,
 * the implementation details,
 * the ablation and diagnostic scripts,
+* the calibration sanity-check scripts,
 * and the structure needed to reproduce the reported experiments.
 
 ## TRL implementation notes
 
-The practical TRL implementation uses:
+The practical TRL implementation uses two support axes around a fixed MAP checkpoint:
 
-* a MAP checkpoint as the base solution,
-* stochastic Hessian-vector products for curvature access,
-* a low-rank transverse subspace,
-* a transported discrete spine,
-* validation-selected transverse scale,
+* a low-rank, full-network transverse subspace selected by stochastic Fisher/GGN-style curvature-vector products,
+* a discrete low-loss spine representing longitudinal support,
+* validation-selected tube scale,
+* transported transverse structure along the spine,
 * and BatchNorm recalibration when applicable.
+
+The central scalability cut is rank restriction with full-network access, rather than restricting uncertainty to the final layer. The transverse subspace carries most of the gain around deeply trained CIFAR-scale checkpoints, while the spine is used to represent longitudinal support and to diagnose when a low-loss corridor carries additional functional variation. The toy and few-shot fine-tuning diagnostics are included to characterize this regime dependence.
 
 The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The backbone prior-boost coefficient `c=50` is selected on a held-out clean validation split by validation NLL from a small sweep over `c`, and is then confirmed on the test split. The tube scale `beta_perp` is likewise selected on the held-out clean validation split by validation NLL in the CIFAR-scale pipeline. The Table 16 sweeps report both validation and test sensitivity for the boost, showing that the no-boost setting collapses and that the boost factor and tube scale do not reduce to a single effective product.
 
@@ -197,7 +231,8 @@ The paper experiments use multiple regimes:
 5. CIFAR-100 to CIFAR-10 few-shot fine-tuning,
 6. WideResNet-16-4 and VGG-11-BN architecture checks,
 7. spine functional-disagreement diagnostics,
-8. TRL hyperparameter and implementation ablations.
+8. TRL hyperparameter and implementation ablations,
+9. calibration sanity checks for last-layer Laplace tuning and MAP temperature scaling.
 
 Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, ImageNet train/validation roots, TRL rank, spine length, tube scale, FixBN batches, and output paths.
 
