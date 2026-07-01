@@ -115,6 +115,10 @@ def optimize_prior(la: Laplace, rule: str, val_loader=None, pred_type: Optional[
     kwargs = {"method": "gridsearch", "val_loader": val_loader}
     if pred_type is not None:
         kwargs["pred_type"] = pred_type
+        if pred_type == "nn":
+            kwargs["link_approx"] = "mc"
+        elif pred_type == "glm":
+            kwargs["link_approx"] = "probit"
 
     def _run_gridsearch():
         try:
