@@ -19,7 +19,8 @@ from sklearn.metrics import roc_auc_score
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 THIS = Path(__file__).resolve()
-for p in [THIS.parent, THIS.parents[1], Path.cwd(), Path.cwd() / "scripts", Path.cwd() / "code"]:
+ROOT = THIS.parents[1]
+for p in [THIS.parent, ROOT / "scripts", ROOT, Path.cwd(), Path.cwd() / "scripts", Path.cwd() / "code"]:
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 

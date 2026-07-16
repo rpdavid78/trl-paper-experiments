@@ -14,8 +14,9 @@ from torch.nn.utils import parameters_to_vector
 
 THIS = Path(__file__).resolve()
 ROOT = THIS.parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(THIS.parent))
+for path in (ROOT / "scripts", ROOT, THIS.parent):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from trl_iclr_utils.experiment_io import append_jsonl  # noqa: E402
 from cifar100_all_methods_iclr import (  # noqa: E402

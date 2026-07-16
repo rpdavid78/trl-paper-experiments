@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from __future__ import annotations
 
+import argparse
 import csv
 import glob
 import json
@@ -15,9 +16,6 @@ OUT = ROOT / "paper_assets"
 TABLES = OUT / "tables"
 FIGS = OUT / "figures"
 CSVS = OUT / "csv"
-
-for d in [TABLES, FIGS, CSVS]:
-    d.mkdir(parents=True, exist_ok=True)
 
 METRICS = ["acc", "nll", "ece", "brier"]
 DIRECTION = {
@@ -544,6 +542,31 @@ Appendix should include:
     print("Wrote", OUT / "MANIFEST.md")
 
 def main():
+    global ROOT, OUT, TABLES, FIGS, CSVS
+
+    parser = argparse.ArgumentParser(
+        description="Build the paper CSV, LaTeX table, and PDF figure assets from aggregated results."
+    )
+    parser.add_argument(
+        "--results-root",
+        default="results",
+        help="Directory containing the expected JSONL and summary CSV inputs.",
+    )
+    parser.add_argument(
+        "--out-dir",
+        default=None,
+        help="Output directory (default: <results-root>/paper_assets).",
+    )
+    args = parser.parse_args()
+
+    ROOT = Path(args.results_root)
+    OUT = Path(args.out_dir) if args.out_dir else ROOT / "paper_assets"
+    TABLES = OUT / "tables"
+    FIGS = OUT / "figures"
+    CSVS = OUT / "csv"
+    for directory in (TABLES, FIGS, CSVS):
+        directory.mkdir(parents=True, exist_ok=True)
+
     build_cifar100_clean()
     build_cifar100c_main()
     build_cifar100c_by_severity()

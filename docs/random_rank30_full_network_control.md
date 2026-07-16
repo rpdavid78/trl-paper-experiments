@@ -21,6 +21,28 @@ The control replaces the Fisher/GGN-selected TRL transverse subspace with a rand
 
 The random basis is built from i.i.d. Gaussian draws and orthonormalized by two modified Gram-Schmidt reorthogonalization passes in parameter space. The five-basis sweep is across random bases on a fixed MAP checkpoint, not an across-MAP-seed estimate. The two additional one-basis controls use separate MAP checkpoints.
 
+Example for one basis on MAP seed 0:
+
+```bash
+python scripts/cifar100_random_rank30_baseline.py \
+  --seed 0 \
+  --ckpt-dir checkpoints_c100_seed0 \
+  --rank 30 \
+  --basis-seed 9000 \
+  --basis-device cuda \
+  --cache-path results/random_rank30/cache_map0_basis9000.pt \
+  --trl-tube-scales 2 3 4 6 10 20 \
+  --samples 25 \
+  --fixbn-batches 25 \
+  --hvp-batches 5 \
+  --results results/random_rank30/map0_basis9000.jsonl
+```
+
+Repeat with basis seeds 9000-9004 for the fixed MAP-seed-0 control. The two
+additional checkpoint controls use MAP seeds 1 and 2 with basis seeds 9001 and
+9002 respectively. Add `40` to `--trl-tube-scales` only for the documented
+provenance-clean extension.
+
 ## Clean controls
 
 ### Five random bases on MAP seed 0

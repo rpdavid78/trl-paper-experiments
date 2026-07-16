@@ -43,6 +43,8 @@ import torchvision.transforms as T
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.utils.data import DataLoader, Subset
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 # ----------------------------- import project code -----------------------------
 
@@ -538,7 +540,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    p.add_argument("--cifar100-code-dir", default=".")
+    p.add_argument("--cifar100-code-dir", default=str(REPO_ROOT / "scripts"))
     p.add_argument("--c100-ckpt", default="checkpoints/checkpoints_c100_seed0/resnet18_cifar100_map.pth")
     p.add_argument("--data-root", default="./data")
     p.add_argument("--out", default="results/finetune_spine/finetune_c10_spine_smoke.jsonl")

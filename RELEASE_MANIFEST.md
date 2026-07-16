@@ -1,31 +1,75 @@
 # TRL experiment code release manifest
 
-This repository contains scripts and documentation for the TRL paper experiments.
+This manifest defines the contents and boundaries of the double-blind TRL code
+release. `README.md` is the runnable reproduction guide and maps commands to the
+current paper tables and figures.
 
-## Main folders
+## Included
 
-- `scripts/`: main CIFAR-100 pipelines, architecture checks, utilities.
-- `ablation_scripts/`: TRL ablations and sensitivity scripts.
-- `toy/`: toy spine-isolation experiments.
-- `finetune/`: CIFAR-100 to CIFAR-10 few-shot fine-tuning diagnostic.
-- `diagnostics/`: deterministic spine functional-disagreement diagnostics.
-- `phase1_prereg/`: preregistered Phase 1 materials when available.
-- `assets/`: small paper figure assets when available.
+- `scripts/cifar100_all_methods_iclr.py`: canonical ResNet-18 CIFAR-100 runner.
+- `scripts/cifar100_arch_sensitivity_iclr.py`: WRN-16-4 architecture runner.
+- `scripts/vgg_all_methods_iclr.py` and `scripts/vgg_bn_cifar.py`: VGG-11-BN runner and exact model definition.
+- `scripts/cifar100c_eval_iclr.py`: CIFAR-100-C evaluation.
+- `scripts/cifar100_laplace_prior_grid_iclr.py`: validation-NLL Laplace prior-grid check.
+- `scripts/cifar100_temperature_scaling_iclr.py`: scalar temperature-scaling check.
+- `scripts/cifar100_random_rank30_baseline.py`: random full-network rank-30 control.
+- `scripts/imagenet_marglik_fit.py` and `scripts/imagenet_resnet50_scalecheck.py`: ImageNet/ResNet-50 scale-check.
+- `scripts/aggregate_results.py` and `scripts/make_paper_assets.py`: aggregation and generated-asset utilities.
+- `ablation_scripts/`: rank/spine/tube/FixBN, fixed-basis, stale-eigenspace, and fresh-refresh diagnostics.
+- `diagnostics/`: deterministic spine loss and functional-disagreement analysis.
+- `finetune/`: CIFAR-100 to CIFAR-10 small-data fine-tuning diagnostics.
+- `toy/`: final toy-table driver and underlying toy implementations.
+- `docs/`: protocol notes, grids, commands, and reported sanity-check outcomes.
+- `phase1_prereg/`: frozen Phase 1 pre-registration and provenance note.
+- `scripts/all_exported_code_snapshot/`: historical flattened-export snapshot; not the canonical execution surface.
+- `requirements.txt`: pinned audited Python dependency versions.
 
-## Not included
+## Intentionally excluded
 
-Large checkpoints, raw result files, datasets, and logs are intentionally excluded.
-ImageNet is not redistributed because of dataset size and redistribution/licensing restrictions.
-See `README.md` for original server paths and reproduction notes.
+- CIFAR, SVHN, CIFAR-100-C, and ImageNet data.
+- MAP, ensemble, SWAG, MC-Dropout, and fine-tuned checkpoints.
+- Cached TRL spines, random/fresh bases, Lanczos workspaces, and ImageNet caches.
+- Raw JSONL/CSV result files, logs, and generated paper assets.
+- Python virtual environments and package caches.
 
-## ImageNet / ResNet-50 scale-check
+These omissions are expected for an academic code release. Standard small
+datasets are downloaded by torchvision; externally distributed datasets are
+provided through explicit CLI roots. Missing CIFAR checkpoints can be trained
+by the canonical runners. ImageNet uses the fixed torchvision
+`IMAGENET1K_V1` checkpoint and user-provided ImageNet directories.
 
-- `scripts/imagenet_marglik_fit.py`: last-layer Laplace marginal-likelihood fit used to estimate `lambda_base`.
-- `scripts/imagenet_resnet50_scalecheck.py`: ImageNet / ResNet-50 TRL scale-check pipeline.
-- `docs/imagenet_resnet50_scalecheck.md`: protocol and reproduction notes for Appendix I.
+## Reproduction boundary
 
-Large ImageNet datasets, checkpoints, cached bases, raw JSONL files, and generated result files are intentionally excluded. Users must provide local ImageNet train and validation directories to reproduce this scale-check.
+The repository supplies code and protocol sufficient to regenerate the
+reported artifacts, but it does not claim that a full paper rerun is cheap.
+Deep Ensembles require repeated training, TRL construction uses HVP/Lanczos
+operations, fresh-refresh repeats eigendecomposition along the spine, and the
+ImageNet diagnostics require substantial GPU memory and data I/O.
 
-## Random rank-30 subspace control
+Nested experiments must preserve their independent unit during aggregation.
+In particular, Table 17 averages posterior-sampling repeats within each MAP
+checkpoint before computing mean and sample standard deviation across three MAP
+checkpoints. `scripts/aggregate_results.py --independent-unit` implements this
+rule.
 
-- `scripts/cifar100_random_rank30_baseline.py`: random low-rank subspace baseline used as a control against the TRL transverse subspace.
+## Audited environment
+
+- Python 3.12.3
+- PyTorch 2.5.1+cu121
+- torchvision 0.20.1+cu121
+- laplace-torch 0.2.2.2
+- NumPy 1.26.4
+- pandas 3.0.3
+- SciPy 1.17.1
+- scikit-learn 1.8.0
+- matplotlib 3.10.9
+- Pillow 12.2.0
+- 2 x NVIDIA RTX 6000 Ada Generation, 49,140 MiB each
+- NVIDIA driver 610.43.02
+
+## Review status
+
+The manuscript is under double-blind review. Author-identifying citation
+metadata and an archival release tag are deferred until de-anonymization. The
+current `LICENSE` remains all rights reserved; public visibility alone does not
+make the release OSI open source.

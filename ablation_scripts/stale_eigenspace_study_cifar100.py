@@ -12,7 +12,7 @@ Outputs JSONL rows with:
   - relative top-eigenvalue drift compared with the MAP spectrum
 
 Run example:
-  PYTHONPATH=. python scripts/stale_eigenspace_study_cifar100.py \
+  python ablation_scripts/stale_eigenspace_study_cifar100.py \
     --seed 0 --k 30 --steps 40 --fractions 0 0.25 0.5 0.75 1.0 \
     --results results_iclr/stale_eigenspace_cifar100.jsonl
 """
@@ -32,8 +32,9 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 # Import the instrumented CIFAR-100 script.
 THIS = Path(__file__).resolve()
 ROOT = THIS.parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(THIS.parent))
+for path in (ROOT / "scripts", ROOT, THIS.parent):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from trl_iclr_utils.experiment_io import StageTimer, append_jsonl  # noqa: E402
 from cifar100_all_methods_iclr import (  # noqa: E402
