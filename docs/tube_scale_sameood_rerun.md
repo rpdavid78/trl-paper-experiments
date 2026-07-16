@@ -1,6 +1,6 @@
-# Table 14 / Figure 9: tube-scale sensitivity rerun
+# Table 15 / Figure 10: tube-scale sensitivity rerun
 
-This note documents the final CIFAR-100 / ResNet-18 tube-scale sensitivity protocol used for Table 14 and Figure 9.
+This note documents the final CIFAR-100 / ResNet-18 tube-scale sensitivity protocol used for Table 15 and Figure 10.
 
 ## Purpose
 
@@ -56,7 +56,9 @@ The selected scale for the main CIFAR-100 TRL configuration is `beta_perp = 4.0`
 The corresponding table and figure assets are generated from `results/tube_scale_sensitivity_3seeds_summary.csv` by:
 
 ```bash
-python scripts/make_paper_assets.py
+python scripts/make_paper_assets.py \
+  --results-root results \
+  --out-dir results/paper_assets
 ```
 
 This writes:

@@ -3,6 +3,7 @@ import csv
 import json
 import math
 import os
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -15,12 +16,16 @@ import torchvision
 import torchvision.transforms as transforms
 from torch.nn.utils import vector_to_parameters
 
+THIS = Path(__file__).resolve()
+SCRIPTS_DIR = THIS.parents[1] / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
 try:
     from cifar100_all_methods_iclr import ResNetCIFAR, fix_bn, set_seed
 except ModuleNotFoundError as e:
     raise SystemExit(
-        "Could not import cifar100_all_methods_iclr. Set PYTHONPATH to include the code directory, e.g.\n"
-        "export PYTHONPATH=.:./scripts:$PYTHONPATH"
+        f"Could not import cifar100_all_methods_iclr from {SCRIPTS_DIR}."
     ) from e
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
