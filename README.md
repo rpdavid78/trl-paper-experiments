@@ -106,6 +106,13 @@ The experiments were run with PyTorch, torchvision, scipy, scikit-learn, pandas,
 
 The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, CIFAR-100-C, and ImageNet. Dataset downloads are handled by the scripts or expected to be placed in a local data directory. Large datasets, including ImageNet, are not included in this repository.
 
+Dataset placement is as follows:
+
+* CIFAR-100, CIFAR-10, and SVHN are downloaded by torchvision into `./data` by the scripts that use them.
+* CIFAR-100-C must be downloaded separately and passed to `scripts/cifar100c_eval_iclr.py` via `--cifar100c-root`. The directory should contain `labels.npy` and the corruption arrays, for example `gaussian_noise.npy`.
+* ImageNet must be provided as local train and validation directories and passed via `--train-root` and `--val-root` to the ImageNet scale-check scripts.
+* ImageNet is not redistributed in this repository because of dataset size and redistribution/licensing restrictions.
+
 ## Checkpoints and results
 
 Large checkpoints, raw logs, cached TRL spines, and raw result files are intentionally not included in this code release.
@@ -116,6 +123,25 @@ The repository is intended to provide:
 * the implementation details,
 * the ablation and diagnostic scripts,
 * and the structure needed to reproduce the reported experiments.
+
+Checkpoints are expected to be regenerated locally unless explicitly supplied by the user. The main CIFAR-100 scripts write checkpoints under `--ckpt-dir` (defaulting to seed-specific `checkpoints_*` directories). CIFAR-100-C evaluation expects the corresponding CIFAR-100 checkpoints to exist, or can train missing baselines when invoked with `--train-missing-baselines`.
+
+## Reproduction checklist
+
+The table below maps the main paper artifacts to the relevant commands or notes. Full paper-scale runs require multiple seeds and the non-quick settings shown in the scripts and documentation.
+
+| Artifact / regime | Entry point | Data/checkpoint notes | Compute |
+| --- | --- | --- | --- |
+| CIFAR-100 / ResNet-18 main benchmark | `python scripts/cifar100_all_methods_iclr.py --methods all --seed <seed>` | Uses torchvision CIFAR-100/SVHN in `./data`; writes checkpoints/results to local paths. | Heavy GPU run for all methods, especially Deep Ensembles, SWAG, and TRL. |
+| CIFAR-100-C robustness | `python scripts/cifar100c_eval_iclr.py --cifar100c-root <cifar100c_root> --seed <seed>` | Requires CIFAR-100-C files and existing CIFAR-100 checkpoints, unless `--train-missing-baselines` is used. | Moderate to heavy GPU evaluation depending on methods and severities. |
+| Architecture sensitivity | `python scripts/cifar100_arch_sensitivity_iclr.py --arch wrn16_4 --seed <seed>` and `python scripts/vgg_all_methods_iclr.py --seed <seed>` | Uses torchvision CIFAR-100/SVHN in `./data`; writes architecture-specific checkpoints. | Heavy GPU runs. |
+| Toy Tables 3--5 | `python toy/rerun_toy_tables.py` or `bash toy/run_final_toy_tables.sh` | Self-contained synthetic/toy setting. | Light CPU/GPU run. |
+| Tube-scale sensitivity, Table 14 / Figure 9 | See `docs/tube_scale_sameood_rerun.md` | Reuses CIFAR-100 checkpoints for each seed and forced `--trl-tube-scales <beta_perp>`. | Heavy but smaller than rerunning all methods. |
+| Boost-prior ablation, Table 16 | See `docs/table16_boost_ablation.md`; implementation in `scripts/cifar100_all_methods_iclr.py` | Uses CIFAR-100 checkpoints and the validation/test sweep protocol described in the doc. | Heavy GPU sweep. |
+| Random rank-30 control | `python scripts/cifar100_random_rank30_baseline.py` and `docs/random_rank30_full_network_control.md` | Requires CIFAR-100 checkpoints for the controlled MAP seeds. | Moderate to heavy GPU run. |
+| CIFAR-100 to CIFAR-10 fine-tuning diagnostic | `python finetune/finetune_cifar10_spine_smoke.py --c100-ckpt <path>` | Requires a CIFAR-100 MAP checkpoint; CIFAR-10 is downloaded to `--data-root` (default `./data`). | Moderate GPU run. |
+| Spine functional-disagreement diagnostic | `python diagnostics/spine_functional_disagreement_cifar100.py --ckpt-root <checkpoint_root>` | Requires stored MAP and spine checkpoints under `checkpoints_c100_seed<seed>/`. | Moderate GPU run. |
+| ImageNet / ResNet-50 scale-check | See the ImageNet section below and `docs/imagenet_resnet50_scalecheck.md` | Requires local ImageNet train/validation roots; uses torchvision `IMAGENET1K_V1`; ImageNet is not included. | Very heavy GPU/data run. |
 
 ## TRL implementation notes
 

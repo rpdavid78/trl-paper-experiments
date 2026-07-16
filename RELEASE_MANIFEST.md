@@ -15,6 +15,7 @@ This repository contains scripts and documentation for the TRL paper experiments
 ## Not included
 
 Large checkpoints, raw result files, datasets, and logs are intentionally excluded.
+ImageNet is not redistributed because of dataset size and redistribution/licensing restrictions.
 See `README.md` for original server paths and reproduction notes.
 
 ## ImageNet / ResNet-50 scale-check
@@ -23,7 +24,7 @@ See `README.md` for original server paths and reproduction notes.
 - `scripts/imagenet_resnet50_scalecheck.py`: ImageNet / ResNet-50 TRL scale-check pipeline.
 - `docs/imagenet_resnet50_scalecheck.md`: protocol and reproduction notes for Appendix I.
 
-Large ImageNet datasets, checkpoints, cached bases, raw JSONL files, and generated result files are intentionally excluded.
+Large ImageNet datasets, checkpoints, cached bases, raw JSONL files, and generated result files are intentionally excluded. Users must provide local ImageNet train and validation directories to reproduce this scale-check.
 
 ## Random rank-30 subspace control
 
