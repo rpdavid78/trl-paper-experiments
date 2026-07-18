@@ -47,7 +47,53 @@ RELEASE_MANIFEST.md
 python scripts/cifar100_all_methods_iclr.py --methods all --seed 0
 ```
 
-This script contains the main CIFAR-100 experiment pipeline, including MAP, Laplace baselines, TRL, Deep Ensembles, SWAG, and MC-Dropout.
+This script contains the main CIFAR-100 experiment pipeline, including MAP, Laplace baselines, TRL, Deep Ensembles, SWAG-Diag, and MC-Dropout.
+
+### SWAG-Diag protocol and FixBN audit
+
+The released baseline is **SWAG-Diag**: it stores the arithmetic mean and
+second moment of each parameter and samples a diagonal Gaussian. It does not
+include the low-rank deviation matrix of full SWAG. The canonical
+clean-benchmark runner
+[`scripts/cifar100_all_methods_iclr.py`](scripts/cifar100_all_methods_iclr.py)
+initializes SWAG-Diag from the MAP checkpoint regardless of whether Deep
+Ensemble ran earlier under `--methods all`. Together with the paired
+[`scripts/cifar100c_eval_iclr.py`](scripts/cifar100c_eval_iclr.py) evaluator, it
+uses the independent-reset FixBN option, the versioned cache format, and cache
+provenance validation against the complete MAP state_dict including BN buffers.
+Incompatible or provenance-free caches are rejected by default.
+
+Those reset/cache/provenance guarantees are specific to the canonical runner,
+its exported mirror, and the CIFAR-100-C evaluator. Secondary architecture,
+VGG, and base runners, together with their noncanonical historical snapshot
+counterparts, received the MAP-initializer correction and `SWAG-Diag` result
+label only; they retain their own historical sampling, FixBN, and cache
+protocols and should not be assumed to accept the canonical runner's flags.
+
+The corrected default uses independent BatchNorm recalibration
+(`--swag-fixbn-mode reset`). The exact published CIFAR-100 SWAG-Diag protocol
+used 20 posterior samples, 20 FixBN batches, and the legacy rolling-buffer
+behavior. To reproduce that path with a known historical cache:
+
+```bash
+python scripts/cifar100_all_methods_iclr.py \
+  --methods swag \
+  --seed 0 \
+  --swag-samples 20 \
+  --swag-fixbn-batches 20 \
+  --swag-fixbn-mode rolling \
+  --swag-stats c100_swag_stats.pth \
+  --allow-legacy-swag-cache
+```
+
+Do not use `--allow-legacy-swag-cache` for an unknown cache. Regenerate the
+versioned default cache instead. A paired seed-0 audit found negligible
+predictive differences between rolling and independent reset FixBN, so this
+correction does not require replacing the reported five-seed SWAG-Diag row.
+The protocol, metrics, and artifact hashes are recorded in
+[`docs/swag_diag_protocol.md`](docs/swag_diag_protocol.md).
+The paired audit runner is
+[`diagnostics/swag_fixbn_ab_cifar100.py`](diagnostics/swag_fixbn_ab_cifar100.py).
 
 ### CIFAR-100-C robustness
 
@@ -234,7 +280,7 @@ The paper experiments use multiple regimes:
 8. TRL hyperparameter and implementation ablations,
 9. calibration sanity checks for last-layer Laplace tuning and MAP temperature scaling.
 
-Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, ImageNet train/validation roots, TRL rank, spine length, tube scale, FixBN batches, and output paths.
+Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, ImageNet train/validation roots, TRL rank, spine length, tube scale, FixBN batches and mode, SWAG-Diag sampling/cache provenance, and output paths.
 
 ## Final toy-table reproduction notes
 

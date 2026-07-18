@@ -444,7 +444,8 @@ def deep_ensemble(tr_loader_aug, ts_loader, ood_loader, cfg: CFG):
     p_ens = torch.stack(preds_id).mean(0)
     p_ens_ood = torch.stack(preds_ood).mean(0)
 
-    # also returns the last member (as in your script) to start SWAG
+    # The last member is returned for legacy callers only. SWAG-Diag must start
+    # from the MAP checkpoint, independently of method execution order.
     return p_ens, p_ens_ood, last_model, targets_ts
 
 
@@ -915,8 +916,8 @@ def main(cfg: CFG):
     # Deep Ensemble
     p_ens, p_ens_ood, last_model, _ = deep_ensemble(tr_aug, ts, ood, cfg)
 
-    # SWAG (starting from the last_model of the ensemble, as in your script)
-    p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, last_model, cfg)
+    # SWAG-Diag always starts from the MAP checkpoint.
+    p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, model_map, cfg)
 
     # MC Dropout (dropout model)
     print("\n>>> [MC Dropout]...")
@@ -943,7 +944,7 @@ def main(cfg: CFG):
         print(f"{name:12s} | {acc*100:6.2f} | {nll:.4f} | {ece:.4f} | {bri:.4f} | {auc:.4f}")
 
     print("\n" + "=" * 100)
-    print(" RESULTS: CIFAR-100 (ResNet-18 CIFAR-style) [MAP | Laplace(ELA/LLA) | DE | SWAG | MC-Dropout | TRL]")
+    print(" RESULTS: CIFAR-100 (ResNet-18 CIFAR-style) [MAP | Laplace(ELA/LLA) | DE | SWAG-Diag | MC-Dropout | TRL]")
     print("=" * 100)
     print("Method       | Acc %  | NLL    | ECE    | Brier  | AUROC")
     print("-" * 100)
@@ -951,7 +952,7 @@ def main(cfg: CFG):
     show("ELA", p_ela, p_ela_ood)
     show("LLA", p_lla, p_lla_ood)
     show("DeepEns", p_ens, p_ens_ood)
-    show("SWAG", p_swag, p_swag_ood)
+    show("SWAG-Diag", p_swag, p_swag_ood)
     show("MC-Dropout", p_mc, p_mc_ood)
     show("TRL", p_trl, p_trl_ood)
     print("-" * 100)
