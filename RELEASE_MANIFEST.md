@@ -16,10 +16,10 @@ current paper tables and figures.
 - `scripts/imagenet_marglik_fit.py` and `scripts/imagenet_resnet50_scalecheck.py`: ImageNet/ResNet-50 scale-check.
 - `scripts/aggregate_results.py` and `scripts/make_paper_assets.py`: aggregation and generated-asset utilities.
 - `ablation_scripts/`: rank/spine/tube/FixBN, fixed-basis, stale-eigenspace, and fresh-refresh diagnostics.
-- `diagnostics/`: deterministic spine loss and functional-disagreement analysis.
+- `diagnostics/`: deterministic spine loss and functional-disagreement analysis, including the paired SWAG-Diag FixBN audit.
 - `finetune/`: CIFAR-100 to CIFAR-10 small-data fine-tuning diagnostics.
 - `toy/`: final toy-table driver and underlying toy implementations.
-- `docs/`: protocol notes, grids, commands, and reported sanity-check outcomes.
+- `docs/`: protocol notes, grids, commands, and reported sanity-check outcomes, including `docs/swag_diag_protocol.md`.
 - `phase1_prereg/`: frozen Phase 1 pre-registration and provenance note.
 - `scripts/all_exported_code_snapshot/`: historical flattened-export snapshot; not the canonical execution surface.
 - `requirements.txt`: pinned audited Python dependency versions.
@@ -27,7 +27,7 @@ current paper tables and figures.
 ## Intentionally excluded
 
 - CIFAR, SVHN, CIFAR-100-C, and ImageNet data.
-- MAP, ensemble, SWAG, MC-Dropout, and fine-tuned checkpoints.
+- MAP, ensemble, SWAG-Diag, MC-Dropout, and fine-tuned checkpoints.
 - Cached TRL spines, random/fresh bases, Lanczos workspaces, and ImageNet caches.
 - Raw JSONL/CSV result files, logs, and generated paper assets.
 - Python virtual environments and package caches.
@@ -37,6 +37,26 @@ datasets are downloaded by torchvision; externally distributed datasets are
 provided through explicit CLI roots. Missing CIFAR checkpoints can be trained
 by the canonical runners. ImageNet uses the fixed torchvision
 `IMAGENET1K_V1` checkpoint and user-provided ImageNet directories.
+
+## SWAG-Diag reproducibility boundary
+
+The released baseline is diagonal SWAG, not full low-rank-plus-diagonal SWAG.
+The canonical `scripts/cifar100_all_methods_iclr.py` runner always initializes
+it from MAP, including under `--methods all`. Together with
+`scripts/cifar100c_eval_iclr.py`, it uses independent-reset FixBN by default and
+validates versioned caches against the complete MAP state_dict, including
+BatchNorm buffers. The published five-seed row used 20 samples, 20 FixBN
+batches, and rolling buffers; that historical path remains available through
+the explicit `--swag-fixbn-mode rolling` option.
+
+The historical flattened snapshot received the corresponding SWAG-Diag
+initializer, FixBN, and cache corrections needed for provenance, but it is not
+a byte-for-byte mirror and is not the recommended execution surface. Secondary
+architecture, VGG, and base runners received only the MAP-initializer correction
+and `SWAG-Diag` label; they retain their historical sampling, FixBN, and cache
+protocols. Exact commands, paired seed-0 metrics, and artifact hashes are in
+`docs/swag_diag_protocol.md`; the audit runner is
+`diagnostics/swag_fixbn_ab_cifar100.py`.
 
 ## Reproduction boundary
 

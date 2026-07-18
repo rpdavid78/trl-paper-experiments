@@ -3,7 +3,7 @@
 # - MAP
 # - Laplace (Last-layer, KRON) + marglik => ELA/LLA
 # - Deep Ensemble (DE)
-# - SWAG
+# - SWAG-Diag
 # - MC Dropout
 # - TRL Stage-2 (HVP ablation) with tube_scale sweep
 #
@@ -20,8 +20,10 @@ import os
 import time
 import copy
 import gc
+import hashlib
 import math
 import random
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
@@ -88,7 +90,7 @@ class CFG:
     map_ckpt: str = "resnet18_cifar100_map.pth"
     mcdo_ckpt: str = "resnet18_cifar100_mcdo.pth"
     ens_prefix: str = "c100_ens"
-    swag_stats: str = "c100_swag_stats.pth"
+    swag_stats: str = "c100_swag_diag_map_stats_v2.pth"
     trl_spine: str = "c100_trl_stage2_spine.pth"
 
     # Laplace
@@ -103,11 +105,16 @@ class CFG:
     # SWAG
     swag_epochs: int = 10
     swag_lr: float = 1e-3
-    swag_samples: int = 25
+    swag_samples: int = 20
     swag_sample_scale: float = 1.0
     swag_collect_momentum: float = 0.9
     swag_collect_alpha: float = 0.1
     swag_fixbn_batches: int = 20
+    allow_legacy_swag_cache: bool = False
+
+    # SWAG-only BatchNorm refresh. ``reset`` is the corrected independent
+    # recalibration; use ``rolling`` to reproduce the originally reported run.
+    swag_fixbn_mode: str = "reset"
 
     # MC Dropout
     mcdo_p: float = 0.2
@@ -159,6 +166,72 @@ def cleanup():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+SWAG_CACHE_SCHEMA_VERSION = 2
+
+
+def model_state_sha256(model: nn.Module) -> str:
+    """Return a deterministic fingerprint of parameters and persistent buffers."""
+    digest = hashlib.sha256()
+    for name, value in model.state_dict().items():
+        tensor = value.detach().cpu().contiguous()
+        metadata = (
+            name.encode("utf-8"),
+            str(tensor.dtype).encode("ascii"),
+            repr(tuple(tensor.shape)).encode("ascii"),
+        )
+        for field in metadata:
+            digest.update(len(field).to_bytes(8, "big"))
+            digest.update(field)
+        raw = tensor.reshape(-1).view(torch.uint8).numpy().tobytes()
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
+
+
+def validate_swag_cache_provenance(payload: Dict, map_model: nn.Module,
+                                   cfg: CFG, allow_legacy: bool = False) -> str:
+    """Validate the MAP state and collection protocol behind cached moments."""
+    map_sha256 = model_state_sha256(map_model)
+    expected = {
+        "schema_version": SWAG_CACHE_SCHEMA_VERSION,
+        "base_model_source": "MAP",
+        "base_model_state_sha256": map_sha256,
+        "swag_variant": "diagonal",
+        "map_seed": int(cfg.seed),
+        "swag_epochs": int(cfg.swag_epochs),
+        "swag_lr": float(cfg.swag_lr),
+        "swag_momentum": float(cfg.momentum),
+        "swag_batch_size": int(cfg.batch_size),
+        "swag_num_workers": int(cfg.num_workers),
+    }
+    missing = [key for key in expected if key not in payload]
+    if missing:
+        if not allow_legacy:
+            raise RuntimeError(
+                "Legacy or incomplete SWAG cache provenance "
+                f"(missing: {', '.join(missing)}). Regenerate it or "
+                "pass --allow-legacy-swag-cache for exact historical reproduction."
+            )
+        warnings.warn(
+            "Accepting legacy SWAG cache with incomplete provenance metadata.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    # A legacy override waives absent metadata only. Any metadata that is
+    # present must still agree with the selected MAP and collection protocol.
+    mismatches = [
+        f"{key}={payload[key]!r} (expected {value!r})"
+        for key, value in expected.items()
+        if key in payload and payload[key] != value
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "SWAG cache provenance mismatch: " + "; ".join(mismatches)
+        )
+    return map_sha256
 
 
 def set_seed(seed: int):
@@ -497,12 +570,13 @@ def deep_ensemble(tr_loader_aug, ts_loader, ood_loader, cfg: CFG):
     p_ens = torch.stack(preds_id).mean(0)
     p_ens_ood = torch.stack(preds_ood).mean(0)
 
-    # also returns the last member (as in your script) to start SWAG
+    # The last member is returned for legacy callers only. The canonical runner
+    # always initializes SWAG-Diag from the MAP checkpoint.
     return p_ens, p_ens_ood, last_model, targets_ts
 
 
 # ==============================================================================
-# SWAG (simplified, maintaining its behavior)
+# SWAG-Diag (diagonal moments only; no low-rank deviation matrix)
 # ==============================================================================
 class SWAG:
     def __init__(self, base_model: nn.Module, cfg: CFG):
@@ -540,27 +614,52 @@ class SWAG:
             p.data = mu + math.sqrt(scale) * torch.sqrt(var) * z
 
 
-def fix_bn(model: nn.Module, loader, device: torch.device, num_batches: int, return_elapsed: bool = False):
-    """Recompute BN running statistics using forward passes only.
+def fix_bn(model: nn.Module, loader, device: torch.device, num_batches: int,
+           return_elapsed: bool = False, *, mode: str = "rolling"):
+    """Refresh BN statistics with either independent or legacy semantics.
 
-    This is a practical inference component. When return_elapsed=True, returns
-    the wall-clock time spent in the BN recalibration pass so that FixBN overhead
-    can be reported separately from posterior prediction.
+    ``reset`` clears every BatchNorm running buffer for the current sampled
+    network and uses cumulative averaging over the requested batches. This is
+    the corrected independent recalibration. ``rolling`` preserves the legacy
+    behavior used by the published runs: buffers and their original momentum
+    carry over between posterior samples.
     """
-    if torch.cuda.is_available():
+    if mode not in {"reset", "rolling"}:
+        raise ValueError(f"Unsupported FixBN mode: {mode!r}")
+    if num_batches < 1:
+        raise ValueError(f"num_batches must be positive, got {num_batches}")
+
+    bn_layers = [
+        module for module in model.modules()
+        if isinstance(module, nn.modules.batchnorm._BatchNorm)
+    ]
+    original_momenta = [module.momentum for module in bn_layers]
+
+    use_cuda = torch.device(device).type == "cuda" and torch.cuda.is_available()
+    if use_cuda:
         torch.cuda.synchronize()
     start = time.perf_counter()
-    model.train()
-    with torch.no_grad():
-        it = iter(loader)
-        for _ in range(num_batches):
-            try:
-                x, _ = next(it)
-            except StopIteration:
-                break
-            model(x.to(device))
-    model.eval()
-    if torch.cuda.is_available():
+    try:
+        if mode == "reset":
+            for module in bn_layers:
+                module.reset_running_stats()
+                module.momentum = None
+        model.train()
+        with torch.no_grad():
+            it = iter(loader)
+            for _ in range(num_batches):
+                try:
+                    x, _ = next(it)
+                except StopIteration:
+                    break
+                model(x.to(device))
+    finally:
+        model.eval()
+        if mode == "reset":
+            for module, momentum in zip(bn_layers, original_momenta):
+                module.momentum = momentum
+
+    if use_cuda:
         torch.cuda.synchronize()
     elapsed = time.perf_counter() - start
     if return_elapsed:
@@ -568,22 +667,30 @@ def fix_bn(model: nn.Module, loader, device: torch.device, num_batches: int, ret
     return None
 
 
-def run_swag(tr_loader_aug, ts_loader, ood_loader, last_model: nn.Module, cfg: CFG, timings: Optional[Dict[str, Dict[str, float]]] = None):
-    print("\n>>> [SWAG] Training SWAG (fine-tune + collect)...")
+def run_swag(tr_loader_aug, ts_loader, ood_loader, map_model: nn.Module, cfg: CFG,
+             timings: Optional[Dict[str, Dict[str, float]]] = None):
+    print("\n>>> [SWAG-Diag] Training SWAG-Diag (fine-tune + collect)...")
     ensure_dir(cfg.ckpt_dir)
     stats_path = os.path.join(cfg.ckpt_dir, cfg.swag_stats)
+    map_sha256 = model_state_sha256(map_model)
 
     # se stats existem, carrega
     if os.path.exists(stats_path):
-        print("  Loading SWAG stats...")
+        print("  Loading SWAG-Diag stats...")
         payload = torch.load(stats_path, map_location=DEVICE)
-        swag = SWAG(last_model, cfg)
+        validate_swag_cache_provenance(
+            payload,
+            map_model,
+            cfg,
+            allow_legacy=cfg.allow_legacy_swag_cache,
+        )
+        swag = SWAG(map_model, cfg)
         swag.n = payload["n"]
         swag.mean = [t.to(DEVICE) for t in payload["mean"]]
         swag.sq_mean = [t.to(DEVICE) for t in payload["sq_mean"]]
     else:
-        swag = SWAG(last_model, cfg)
-        m = copy.deepcopy(last_model).to(DEVICE)
+        swag = SWAG(map_model, cfg)
+        m = copy.deepcopy(map_model).to(DEVICE)
         opt = torch.optim.SGD(m.parameters(), lr=cfg.swag_lr, momentum=cfg.momentum)
 
         ctx = StageTimer("swag_finetune_collect", timings) if timings is not None else None
@@ -605,15 +712,32 @@ def run_swag(tr_loader_aug, ts_loader, ood_loader, last_model: nn.Module, cfg: C
             "n": swag.n,
             "mean": [t.detach().cpu() for t in swag.mean],
             "sq_mean": [t.detach().cpu() for t in swag.sq_mean],
+            "schema_version": SWAG_CACHE_SCHEMA_VERSION,
+            "base_model_source": "MAP",
+            "base_model_state_sha256": map_sha256,
+            "swag_variant": "diagonal",
+            "map_seed": int(cfg.seed),
+            "swag_epochs": int(cfg.swag_epochs),
+            "swag_lr": float(cfg.swag_lr),
+            "swag_momentum": float(cfg.momentum),
+            "swag_batch_size": int(cfg.batch_size),
+            "swag_num_workers": int(cfg.num_workers),
         }, stats_path)
 
-    print(">>> [SWAG] Sampling...")
+    print(">>> [SWAG-Diag] Sampling...")
     preds_id = []
     preds_ood = []
     swag_fixbn_sec = 0.0
     for _ in range(cfg.swag_samples):
         swag.sample(scale=cfg.swag_sample_scale)
-        elapsed = fix_bn(swag.base_model, tr_loader_aug, DEVICE, num_batches=cfg.swag_fixbn_batches, return_elapsed=True)
+        elapsed = fix_bn(
+            swag.base_model,
+            tr_loader_aug,
+            DEVICE,
+            num_batches=cfg.swag_fixbn_batches,
+            return_elapsed=True,
+            mode=cfg.swag_fixbn_mode,
+        )
         swag_fixbn_sec += float(elapsed or 0.0)
         preds_id.append(predict_probs(swag.base_model, ts_loader))
         preds_ood.append(predict_probs(swag.base_model, ood_loader))
@@ -640,7 +764,14 @@ def enable_dropout_only(model: nn.Module):
 @torch.no_grad()
 def mc_dropout_predict(model: nn.Module, loader, tr_loader_for_bn, cfg: CFG, timings: Optional[Dict[str, Dict[str, float]]] = None, stage_prefix: str = "mcdo"):
     # calibra BN once (optional; here follows the "fix_bn" style of your baselines)
-    elapsed = fix_bn(model, tr_loader_for_bn, DEVICE, num_batches=cfg.mcdo_fixbn_batches, return_elapsed=True)
+    elapsed = fix_bn(
+        model,
+        tr_loader_for_bn,
+        DEVICE,
+        num_batches=cfg.mcdo_fixbn_batches,
+        return_elapsed=True,
+        mode="rolling",
+    )
     if timings is not None:
         timings[f"{stage_prefix}_fixbn_overhead"] = {"wall_sec": float(elapsed or 0.0), "peak_vram_gb": 0.0}
 
@@ -880,7 +1011,14 @@ class PracticalTRLStage2:
             # Practical FixBN uses the augmented training loader, matching the
             # released implementation. This is not part of the continuous
             # idealization; it is a practical inference step.
-            elapsed = fix_bn(self.model, bn_loader_aug, DEVICE, num_batches=fix_bn_batches, return_elapsed=True)
+            elapsed = fix_bn(
+                self.model,
+                bn_loader_aug,
+                DEVICE,
+                num_batches=fix_bn_batches,
+                return_elapsed=True,
+                mode="rolling",
+            )
             fixbn_total += float(elapsed or 0.0)
 
             preds_batch = []
@@ -1088,6 +1226,7 @@ def _metrics_row(dataset: str, architecture: str, method: str, seed: int, probs_
         'trl_step_size': float(cfg.trl_step_size),
         'trl_fixbn_batches': int(cfg.trl_fixbn_batches),
         'trl_hvp_batches': int(cfg.trl_hvp_batches),
+        'ood_score': 'predictive_entropy',
     }
     row.update(flatten_timings('time', timings))
     if extra:
@@ -1137,19 +1276,28 @@ def main_iclr(cfg: CFG, methods: List[str], results_path: Optional[str] = None):
         if wants('lla'):
             rows.append(_metrics_row('CIFAR-100', 'ResNet-18-CIFAR', 'LLA', cfg.seed, p_lla, p_lla_ood, targets_ts, cfg, t))
 
-    last_model = model_map
     if wants('deepens') or wants('deep_ensemble') or wants('ensemble'):
         t = dict(timings_global)
         with StageTimer('deep_ensemble_train_predict', t):
-            p_ens, p_ens_ood, last_model, _ = deep_ensemble(tr_aug, ts, ood, cfg)
+            p_ens, p_ens_ood, _last_ensemble_member, _ = deep_ensemble(tr_aug, ts, ood, cfg)
         rows.append(_metrics_row('CIFAR-100', 'ResNet-18-CIFAR', 'DeepEns', cfg.seed, p_ens, p_ens_ood, targets_ts, cfg, t,
                                  extra={'ensemble_M': int(cfg.ens_M)}))
 
     if wants('swag'):
         t = dict(timings_global)
         with StageTimer('swag_train_predict', t):
-            p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, last_model, cfg, timings=t)
-        rows.append(_metrics_row('CIFAR-100', 'ResNet-18-CIFAR', 'SWAG', cfg.seed, p_swag, p_swag_ood, targets_ts, cfg, t))
+            p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, model_map, cfg, timings=t)
+        rows.append(_metrics_row(
+            'CIFAR-100', 'ResNet-18-CIFAR', 'SWAG-Diag', cfg.seed,
+            p_swag, p_swag_ood, targets_ts, cfg, t,
+            extra={
+                'swag_variant': 'diagonal',
+                'swag_samples': int(cfg.swag_samples),
+                'swag_fixbn_batches': int(cfg.swag_fixbn_batches),
+                'swag_fixbn_mode': cfg.swag_fixbn_mode,
+                'swag_stats': cfg.swag_stats,
+            },
+        ))
 
     if wants('mcdo') or wants('mc_dropout'):
         t = dict(timings_global)
@@ -1203,6 +1351,14 @@ def parse_args():
     p.add_argument('--trl-val-samples', type=int, default=None)
     p.add_argument('--trl-tube-scales', type=float, nargs='*', default=None)
     p.add_argument('--swag-epochs', type=int, default=None)
+    p.add_argument('--swag-samples', type=int, default=None)
+    p.add_argument('--swag-fixbn-batches', type=int, default=None)
+    p.add_argument('--swag-fixbn-mode', choices=['rolling', 'reset'], default=None,
+                   help='SWAG-Diag BN refresh: reset (corrected default) or rolling (published run).')
+    p.add_argument('--swag-stats', type=str, default=None,
+                   help='SWAG-Diag cache filename inside --ckpt-dir.')
+    p.add_argument('--allow-legacy-swag-cache', action='store_true',
+                   help='Allow a SWAG cache without MAP fingerprint metadata.')
     boost_mode = p.add_mutually_exclusive_group()
     boost_mode.add_argument('--run-boost-ablation', action='store_true',
                             help='Run the validation/test 1D backbone-prior boost sweep and exit.')
@@ -1245,6 +1401,15 @@ def cfg_from_args(args) -> CFG:
     if args.trl_tube_scales is not None and len(args.trl_tube_scales) > 0:
         cfg.trl_tube_scales = tuple(args.trl_tube_scales)
     if args.swag_epochs is not None: cfg.swag_epochs = args.swag_epochs
+    if args.swag_samples is not None: cfg.swag_samples = args.swag_samples
+    if args.swag_fixbn_batches is not None: cfg.swag_fixbn_batches = args.swag_fixbn_batches
+    if args.swag_fixbn_mode is not None: cfg.swag_fixbn_mode = args.swag_fixbn_mode
+    if args.swag_stats is not None: cfg.swag_stats = args.swag_stats
+    cfg.allow_legacy_swag_cache = args.allow_legacy_swag_cache
+    if cfg.swag_samples < 1:
+        raise ValueError("--swag-samples must be positive")
+    if cfg.swag_fixbn_batches < 1:
+        raise ValueError("--swag-fixbn-batches must be positive")
     cfg.run_boost_ablation = args.run_boost_ablation
     cfg.run_boost_betaperp_sweep = args.run_boost_betaperp_sweep
     cfg.boost_results = args.boost_results
@@ -1261,6 +1426,8 @@ def cfg_from_args(args) -> CFG:
         cfg.epochs_map = min(cfg.epochs_map, 1)
         cfg.ens_M = min(cfg.ens_M, 2)
         cfg.swag_epochs = min(cfg.swag_epochs, 1)
+        cfg.swag_samples = min(cfg.swag_samples, 2)
+        cfg.swag_fixbn_batches = min(cfg.swag_fixbn_batches, 1)
         cfg.trl_steps = min(cfg.trl_steps, 3)
         cfg.trl_k_perp = min(cfg.trl_k_perp, 3)
         cfg.trl_val_samples = min(cfg.trl_val_samples, 2)

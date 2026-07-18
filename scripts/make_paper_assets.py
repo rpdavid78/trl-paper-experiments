@@ -470,11 +470,14 @@ def make_figures():
     sev_csv = CSVS / "cifar100c_by_severity_3seeds_summary.csv"
     if sev_csv.exists():
         rows = read_csv(sev_csv)
-        methods = ["DeepEns", "TRL", "MC-Dropout", "MAP", "SWAG"]
+        methods = ["DeepEns", "TRL", "MC-Dropout", "MAP", "SWAG-Diag"]
         for metric in ["nll", "ece"]:
             plt.figure()
             for method in methods:
-                rs = [r for r in rows if r["method"] == method]
+                accepted = {method}
+                if method == "SWAG-Diag":
+                    accepted.add("SWAG")  # legacy JSONL label
+                rs = [r for r in rows if r["method"] in accepted]
                 if not rs:
                     continue
                 rs.sort(key=lambda r: int(r["severity"]))

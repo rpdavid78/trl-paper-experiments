@@ -53,6 +53,7 @@ from cifar100_all_methods_iclr import (  # noqa: E402
     PracticalTRLStage2,
     run_swag,
     set_seed,
+    validate_swag_cache_provenance,
 )
 
 
@@ -129,7 +130,7 @@ def deep_ensemble_predict_loader(models: List[torch.nn.Module], loader):
 
 
 def load_or_train_swag_for_c(cfg: CFG, tr_loader_aug, base_model):
-    """Return a SWAG object for CIFAR-100-C evaluation.
+    """Return a provenance-checked SWAG-Diag object for CIFAR-100-C evaluation.
 
     If stats are missing, this calls run_swag once on clean test/OOD loaders in
     the caller's setup before this function should be called. For direct usage,
@@ -139,6 +140,12 @@ def load_or_train_swag_for_c(cfg: CFG, tr_loader_aug, base_model):
     if not os.path.exists(stats_path):
         return None
     payload = torch.load(stats_path, map_location=DEVICE)
+    validate_swag_cache_provenance(
+        payload,
+        base_model,
+        cfg,
+        allow_legacy=cfg.allow_legacy_swag_cache,
+    )
     swag = SWAG(base_model, cfg)
     swag.n = payload["n"]
     swag.mean = [t.to(DEVICE) for t in payload["mean"]]
@@ -151,7 +158,14 @@ def swag_predict_loader(swag: SWAG, loader, tr_loader_aug, cfg: CFG):
     fixbn_total = 0.0
     for _ in range(cfg.swag_samples):
         swag.sample(scale=cfg.swag_sample_scale)
-        elapsed = fix_bn(swag.base_model, tr_loader_aug, DEVICE, num_batches=cfg.swag_fixbn_batches, return_elapsed=True)
+        elapsed = fix_bn(
+            swag.base_model,
+            tr_loader_aug,
+            DEVICE,
+            num_batches=cfg.swag_fixbn_batches,
+            return_elapsed=True,
+            mode=cfg.swag_fixbn_mode,
+        )
         fixbn_total += float(elapsed or 0.0)
         preds.append(predict_probs(swag.base_model, loader))
     return torch.stack(preds).mean(0), fixbn_total
@@ -174,6 +188,12 @@ def parse_args():
     p.add_argument("--trl-steps", type=int, default=40)
     p.add_argument("--trl-fixbn-batches", type=int, default=25)
     p.add_argument("--trl-samples", type=int, default=25)
+    p.add_argument("--swag-samples", type=int, default=None)
+    p.add_argument("--swag-fixbn-batches", type=int, default=None)
+    p.add_argument("--swag-fixbn-mode", choices=["rolling", "reset"], default=None)
+    p.add_argument("--swag-stats", default=None,
+                   help="SWAG-Diag cache filename inside --ckpt-dir.")
+    p.add_argument("--allow-legacy-swag-cache", action="store_true")
     p.add_argument("--trl-tube-scale", type=float, default=None,
                    help="Use the clean validation-selected TRL tube scale. If omitted, uses first CFG scale.")
     p.add_argument("--train-missing-baselines", action="store_true",
@@ -193,6 +213,15 @@ def main():
     cfg.trl_steps = args.trl_steps
     cfg.trl_fixbn_batches = args.trl_fixbn_batches
     cfg.trl_val_samples = args.trl_samples
+    if args.swag_samples is not None:
+        cfg.swag_samples = args.swag_samples
+    if args.swag_fixbn_batches is not None:
+        cfg.swag_fixbn_batches = args.swag_fixbn_batches
+    if args.swag_fixbn_mode is not None:
+        cfg.swag_fixbn_mode = args.swag_fixbn_mode
+    if args.swag_stats is not None:
+        cfg.swag_stats = args.swag_stats
+    cfg.allow_legacy_swag_cache = args.allow_legacy_swag_cache
     if args.ens_M is not None:
         cfg.ens_M = args.ens_M
     if args.quick:
@@ -200,6 +229,7 @@ def main():
         cfg.ens_M = min(cfg.ens_M, 2)
         cfg.swag_epochs = 1
         cfg.swag_samples = 2
+        cfg.swag_fixbn_batches = min(cfg.swag_fixbn_batches, 1)
         cfg.mcdo_samples = 2
         cfg.trl_steps = min(cfg.trl_steps, 3)
         cfg.trl_k_perp = min(cfg.trl_k_perp, 3)
@@ -261,12 +291,12 @@ def main():
             stats_path = os.path.join(cfg.ckpt_dir, cfg.swag_stats)
             if not os.path.exists(stats_path):
                 if not args.train_missing_baselines:
-                    raise FileNotFoundError(f"Missing SWAG stats {stats_path}. Run main script with --methods swag first, or pass --train-missing-baselines.")
+                    raise FileNotFoundError(f"Missing SWAG-Diag stats {stats_path}. Run main script with --methods swag first, or pass --train-missing-baselines.")
                 # Build stats once using clean test/OOD loaders; predictions here are discarded.
                 run_swag(tr_aug, ts, ood, copy.deepcopy(model_map), cfg, timings=timings)
             swag_obj = load_or_train_swag_for_c(cfg, tr_aug, copy.deepcopy(model_map))
             if swag_obj is None:
-                raise RuntimeError("Could not load or build SWAG stats.")
+                raise RuntimeError("Could not load or build SWAG-Diag stats.")
 
     for corr in corruptions:
         for sev in args.severities:
@@ -305,7 +335,7 @@ def main():
                     with StageTimer(f"eval_{corr}_{sev}_swag", t):
                         probs, fixbn_overhead = swag_predict_loader(swag_obj, loader, tr_aug, cfg)
                     t[f"eval_{corr}_{sev}_swag_fixbn_overhead"] = {"wall_sec": float(fixbn_overhead), "peak_vram_gb": 0.0}
-                    label = "SWAG"
+                    label = "SWAG-Diag"
                 elif method_norm in ["mcdo", "mc_dropout"]:
                     with StageTimer(f"eval_{corr}_{sev}_mcdo", t):
                         probs = mc_dropout_predict(mcdo_model, loader, tr_aug, cfg, timings=t, stage_prefix=f"eval_{corr}_{sev}_mcdo")
@@ -328,6 +358,14 @@ def main():
                     "best_tube_scale": best_ts,
                     "fixbn_overhead_sec": float(fixbn_overhead),
                 }
+                if method_norm == "swag":
+                    row.update({
+                        "swag_variant": "diagonal",
+                        "swag_samples": int(cfg.swag_samples),
+                        "swag_fixbn_batches": int(cfg.swag_fixbn_batches),
+                        "swag_fixbn_mode": cfg.swag_fixbn_mode,
+                        "swag_stats": cfg.swag_stats,
+                    })
                 row.update(flatten_timings("time", t))
                 append_jsonl(args.results, row)
                 print(row)

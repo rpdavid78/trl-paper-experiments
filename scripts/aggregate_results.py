@@ -46,7 +46,10 @@ def load_jsonl(paths: List[str]) -> pd.DataFrame:
                         rows.append(json.loads(line))
     if not rows:
         raise SystemExit("No rows found. Check --input paths.")
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    if "method" in frame.columns:
+        frame["method"] = frame["method"].replace({"SWAG": "SWAG-Diag"})
+    return frame
 
 
 def mean_std_table(df: pd.DataFrame, group_cols: List[str], metrics: List[str]) -> pd.DataFrame:

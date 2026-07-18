@@ -471,7 +471,8 @@ def deep_ensemble(tr_loader_aug, ts_loader, ood_loader, cfg: CFG):
     p_ens = torch.stack(preds_id).mean(0)
     p_ens_ood = torch.stack(preds_ood).mean(0)
 
-    # also returns the last member (as in your script) to start SWAG
+    # The last member is returned for legacy callers only. SWAG-Diag must start
+    # from the MAP checkpoint, independently of method execution order.
     return p_ens, p_ens_ood, last_model, targets_ts
 
 
@@ -1075,8 +1076,8 @@ def main_iclr(cfg: CFG, methods: List[str], results_path: Optional[str] = None):
     if wants('swag'):
         t = dict(timings_global)
         with StageTimer('swag_train_predict', t):
-            p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, last_model, cfg, timings=t)
-        rows.append(_metrics_row('CIFAR-100', cfg.architecture, 'SWAG', cfg.seed, p_swag, p_swag_ood, targets_ts, cfg, t))
+            p_swag, p_swag_ood = run_swag(tr_aug, ts, ood, model_map, cfg, timings=t)
+        rows.append(_metrics_row('CIFAR-100', cfg.architecture, 'SWAG-Diag', cfg.seed, p_swag, p_swag_ood, targets_ts, cfg, t))
 
     if wants('mcdo') or wants('mc_dropout'):
         t = dict(timings_global)

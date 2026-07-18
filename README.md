@@ -56,12 +56,12 @@ artifacts below the selected `--ckpt-dir`. With the documented convention this
 is `checkpoints_c100_seed<seed>/`. The same directory subsequently supplies:
 
 - `resnet18_cifar100_map.pth` for MAP, Laplace, diagnostics, and fine-tuning;
-- ensemble, SWAG, and MC-Dropout checkpoints for their evaluations;
+- ensemble, SWAG-Diag, and MC-Dropout checkpoints for their evaluations;
 - `c100_trl_stage2_spine.pth` for CIFAR-100-C and spine diagnostics.
 
 CIFAR-100-C evaluation normally reuses those checkpoints. Add
 `--train-missing-baselines` only when you deliberately want the evaluator to
-train a missing ensemble, SWAG, or MC-Dropout model.
+train a missing ensemble, SWAG-Diag, or MC-Dropout model.
 
 ImageNet uses the fixed torchvision `ResNet50_Weights.IMAGENET1K_V1` checkpoint;
 torchvision downloads it to its normal cache. The ImageNet scripts generate the
@@ -113,8 +113,8 @@ done
 ```
 
 This trains five Deep Ensemble members per MAP seed in addition to MAP,
-Laplace, SWAG, MC-Dropout, and TRL. To reproduce only a subset, replace `all`
-with one or more of `map ela lla trl deepens swag mcdo`.
+Laplace, SWAG-Diag, MC-Dropout, and TRL. To reproduce only a subset, replace
+`all` with one or more of `map ela lla trl deepens swag mcdo`.
 
 ```bash
 python scripts/aggregate_results.py \
@@ -123,6 +123,45 @@ python scripts/aggregate_results.py \
   --metrics acc nll ece brier auroc runtime_total_sec peak_vram_gb \
   --out results/cifar100_clean_5seeds_summary.csv
 ```
+
+### SWAG-Diag protocol and FixBN audit
+
+The released baseline is **SWAG-Diag**: it stores per-parameter arithmetic
+means and second moments and samples a diagonal Gaussian. It does not include
+the low-rank deviation matrix of full SWAG. The canonical clean-benchmark
+runner, `scripts/cifar100_all_methods_iclr.py`, initializes SWAG-Diag from the
+MAP checkpoint even when Deep Ensemble ran earlier under `--methods all`.
+
+The canonical runner and `scripts/cifar100c_eval_iclr.py` use the corrected
+independent-reset FixBN default, a versioned cache, and provenance validation
+against the complete MAP state_dict including BatchNorm buffers. The historical
+flattened snapshot received the corresponding SWAG-Diag corrections but is not
+a byte-for-byte mirror or the recommended execution surface. Secondary
+architecture, VGG, and base runners received the MAP-initializer correction and
+`SWAG-Diag` result label, but retain their historical sampling, FixBN, and cache
+protocols.
+
+The published five-seed SWAG-Diag row used 20 posterior samples, 20 FixBN
+batches, and rolling BatchNorm buffers. Reproduce that exact path only with a
+known historical cache:
+
+```bash
+python scripts/cifar100_all_methods_iclr.py \
+  --methods swag \
+  --seed 0 \
+  --swag-samples 20 \
+  --swag-fixbn-batches 20 \
+  --swag-fixbn-mode rolling \
+  --swag-stats c100_swag_stats.pth \
+  --allow-legacy-swag-cache
+```
+
+Do not enable `--allow-legacy-swag-cache` for an unknown cache; regenerate the
+versioned default cache instead. A paired seed-0 audit found differences far
+below the predeclared escalation thresholds, so the FixBN correction does not
+require replacing the reported five-seed row. See
+`docs/swag_diag_protocol.md` for exact metrics and artifact hashes, and
+`diagnostics/swag_fixbn_ab_cifar100.py` for the paired audit runner.
 
 ## CIFAR-100-C
 
