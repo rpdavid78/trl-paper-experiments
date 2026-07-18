@@ -1,6 +1,7 @@
 # ImageNet / ResNet-50 scale-check
 
-This note documents the ImageNet / ResNet-50 scale-check reported in Appendix I.
+This note documents Tables 25-27, the ImageNet / ResNet-50 scale-check reported
+in the paper appendix.
 
 The ImageNet experiment is a scale-check, not the main benchmark. It uses a fixed torchvision ResNet-50 pretrained checkpoint (`IMAGENET1K_V1`) and evaluates whether the practical TRL transverse posterior remains operational at ImageNet scale.
 
@@ -49,5 +50,34 @@ python scripts/imagenet_resnet50_scalecheck.py \
 ```
 
 `--spine-steps 0` is the single-checkpoint transverse scale-check. Positive `--spine-steps` values enable the optional post-hoc spine diagnostic.
+
+## Table 26: seed-0 spine-length diagnostic
+
+Keep `--seeds 0 --boost-c 50 --betas 2 --samples 25` fixed and run these
+`(--spine-steps, --spine-step)` pairs in separate output directories:
+
+```text
+(0,  0.01)  length 0.00
+(8,  0.01)  length 0.08
+(24, 0.01)  length 0.24
+(24, 0.02)  length 0.48
+```
+
+For example:
+
+```bash
+python scripts/imagenet_resnet50_scalecheck.py \
+  --train-root <imagenet_train_root> --val-root <imagenet_val_root> \
+  --out-dir results/imagenet_resnet50_scalecheck/spine_T8_ds001 \
+  --seeds 0 --rank 30 --samples 25 --fixbn-batches 25 --hvp-batches 5 \
+  --boost-c 50 --betas 2 --spine-steps 8 --spine-step 0.01
+```
+
+## Table 27: seed-0 transverse-rank diagnostic
+
+Run ranks 30, 50, and 100 with `--seeds 0 --boost-c 50 --betas 2 3 4` and a
+fresh basis for each rank. Set `--lanczos-iters` to three times the rank (90,
+150, and 300). The rank-100 run can use `--basis-device cpu` to reduce GPU
+storage pressure.
 
 Large checkpoints, cached bases, raw JSONL result files, and datasets are not included in the release.

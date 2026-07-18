@@ -137,6 +137,19 @@ class CFG:
     # TRL spine storage (memory)
     trl_store_every: int = 1  # 1 = saves every step (like your script). e.g.: 2 = saves every 2 steps.
 
+    # Dedicated prior-boost diagnostics. These modes reuse one constructed spine
+    # and terminate after writing their rows, so they should be run with
+    # ``--methods trl`` rather than as part of the full baseline suite.
+    run_boost_ablation: bool = False
+    run_boost_betaperp_sweep: bool = False
+    boost_results: str = "results/boost_ablation.jsonl"
+    boost_values: Tuple[float, ...] = (0.0, 10.0, 50.0, 100.0)
+    boost_beta_fixed: float = 4.0
+    boost_beta_grid: Tuple[float, ...] = (2.0, 4.0, 8.0)
+    boost_sampling_seeds: Tuple[int, ...] = (0, 1, 2)
+    boost_n_samples: int = 25
+    boost_fixbn_batches: int = 25
+
 
 CFG_ = CFG()
 DEVICE = torch.device(CFG_.device)
@@ -1070,12 +1083,50 @@ def trl_stage2_run(model_map, base_val, bn_loader_clean, tr_loader_aug, val_load
     with StageTimer("trl_spine_construction", trl_timings):
         trl.build()
     if getattr(cfg, "run_boost_ablation", False):
-        boost_ablation(trl, model_map, base_val,
-                       test_loader=ts_loader, bn_loader_aug=tr_loader_aug, cfg=cfg)
+        rows = []
+        rows.extend(boost_ablation(
+            trl, model_map, base_val,
+            eval_loader=val_loader,
+            bn_loader_aug=tr_loader_aug,
+            cfg=cfg,
+            boosts=cfg.boost_values,
+            beta_fixed=cfg.boost_beta_fixed,
+            seeds=cfg.boost_sampling_seeds,
+            n_samples=cfg.boost_n_samples,
+            fix_bn_batches=cfg.boost_fixbn_batches,
+            split_tag="val",
+        ))
+        rows.extend(boost_ablation(
+            trl, model_map, base_val,
+            eval_loader=ts_loader,
+            bn_loader_aug=tr_loader_aug,
+            cfg=cfg,
+            boosts=cfg.boost_values,
+            beta_fixed=cfg.boost_beta_fixed,
+            seeds=cfg.boost_sampling_seeds,
+            n_samples=cfg.boost_n_samples,
+            fix_bn_batches=cfg.boost_fixbn_batches,
+            split_tag="test",
+        ))
+        for row in rows:
+            append_jsonl(cfg.boost_results, row)
+        print(f"\nWrote {len(rows)} boost-ablation rows to {cfg.boost_results}")
         import sys; sys.exit(0)
     if getattr(cfg, "run_boost_betaperp_sweep", False):
-        boost_betaperp_sweep_2d(trl, model_map, base_val,
-                                test_loader=ts_loader, bn_loader_aug=tr_loader_aug, cfg=cfg)
+        rows = boost_betaperp_sweep_2d(
+            trl, model_map, base_val,
+            test_loader=ts_loader,
+            bn_loader_aug=tr_loader_aug,
+            cfg=cfg,
+            c_grid=cfg.boost_values,
+            beta_grid=cfg.boost_beta_grid,
+            seeds=cfg.boost_sampling_seeds,
+            n_samples=cfg.boost_n_samples,
+            fix_bn_batches=cfg.boost_fixbn_batches,
+        )
+        for row in rows:
+            append_jsonl(cfg.boost_results, row)
+        print(f"\nWrote {len(rows)} joint-sweep rows to {cfg.boost_results}")
         import sys; sys.exit(0)
 
     # sweep in VAL with fixed seed by tube_scale (same as yours)
@@ -1308,8 +1359,29 @@ def parse_args():
                    help='SWAG-Diag cache filename inside --ckpt-dir.')
     p.add_argument('--allow-legacy-swag-cache', action='store_true',
                    help='Allow a SWAG cache without MAP fingerprint metadata.')
+    boost_mode = p.add_mutually_exclusive_group()
+    boost_mode.add_argument('--run-boost-ablation', action='store_true',
+                            help='Run the validation/test 1D backbone-prior boost sweep and exit.')
+    boost_mode.add_argument('--run-boost-betaperp-sweep', action='store_true',
+                            help='Run the joint boost x beta_perp test sensitivity sweep and exit.')
+    p.add_argument('--boost-results', type=str, default='results/boost_ablation.jsonl')
+    p.add_argument('--boost-values', type=float, nargs='+', default=None,
+                   help='Backbone-prior boost values c used by either boost diagnostic.')
+    p.add_argument('--boost-beta-fixed', type=float, default=4.0,
+                   help='Fixed beta_perp for the 1D boost ablation.')
+    p.add_argument('--boost-beta-grid', type=float, nargs='+', default=None,
+                   help='beta_perp values for the joint 2D sensitivity sweep.')
+    p.add_argument('--boost-sampling-seeds', type=int, nargs='+', default=None,
+                   help='Posterior-sampling seeds within one MAP checkpoint.')
+    p.add_argument('--boost-n-samples', type=int, default=25)
+    p.add_argument('--boost-fixbn-batches', type=int, default=25)
     p.add_argument('--quick', action='store_true', help='Debug mode: fewer epochs/samples. Do not use for paper tables.')
-    return p.parse_args()
+    args = p.parse_args()
+    if (args.run_boost_ablation or args.run_boost_betaperp_sweep):
+        methods = {m.lower() for m in args.methods}
+        if not ({'trl', 'all'} & methods):
+            p.error('boost diagnostics require --methods trl (or all)')
+    return args
 
 
 def cfg_from_args(args) -> CFG:
@@ -1338,6 +1410,18 @@ def cfg_from_args(args) -> CFG:
         raise ValueError("--swag-samples must be positive")
     if cfg.swag_fixbn_batches < 1:
         raise ValueError("--swag-fixbn-batches must be positive")
+    cfg.run_boost_ablation = args.run_boost_ablation
+    cfg.run_boost_betaperp_sweep = args.run_boost_betaperp_sweep
+    cfg.boost_results = args.boost_results
+    cfg.boost_beta_fixed = args.boost_beta_fixed
+    cfg.boost_n_samples = args.boost_n_samples
+    cfg.boost_fixbn_batches = args.boost_fixbn_batches
+    if args.boost_values is not None:
+        cfg.boost_values = tuple(args.boost_values)
+    if args.boost_beta_grid is not None:
+        cfg.boost_beta_grid = tuple(args.boost_beta_grid)
+    if args.boost_sampling_seeds is not None:
+        cfg.boost_sampling_seeds = tuple(args.boost_sampling_seeds)
     if args.quick:
         cfg.epochs_map = min(cfg.epochs_map, 1)
         cfg.ens_M = min(cfg.ens_M, 2)
@@ -1350,14 +1434,19 @@ def cfg_from_args(args) -> CFG:
         cfg.trl_fixbn_batches = min(cfg.trl_fixbn_batches, 1)
         cfg.trl_hvp_batches = min(cfg.trl_hvp_batches, 1)
         cfg.trl_tube_scales = (1.0,)
+        cfg.boost_values = cfg.boost_values[:1]
+        cfg.boost_beta_grid = cfg.boost_beta_grid[:1]
+        cfg.boost_sampling_seeds = cfg.boost_sampling_seeds[:1]
+        cfg.boost_n_samples = min(cfg.boost_n_samples, 2)
+        cfg.boost_fixbn_batches = min(cfg.boost_fixbn_batches, 1)
     return cfg
 
 
 
-def boost_ablation(trl, model, base_val, test_loader, bn_loader_aug, cfg,
+def boost_ablation(trl, model, base_val, eval_loader, bn_loader_aug, cfg,
                    boosts=(0.0, 10.0, 50.0, 100.0),
                    beta_fixed=4.0, seeds=(0, 1, 2),
-                   n_samples=25, fix_bn_batches=25):
+                   n_samples=25, fix_bn_batches=25, split_tag="test"):
     import numpy as np, collections, torch
     if not trl.spine:
         raise RuntimeError("Spine vazia. Rode trl.build() antes da ablacao.")
@@ -1380,20 +1469,33 @@ def boost_ablation(trl, model, base_val, test_loader, bn_loader_aug, cfg,
             np.random.seed(seed); torch.manual_seed(seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(seed)
-            probs, targets = trl.predict(loader=test_loader,
+            probs, targets = trl.predict(loader=eval_loader,
                                          bn_loader_aug=bn_loader_aug,
                                          n_samples=n_samples,
                                          fix_bn_batches=fix_bn_batches)
             acc, nll, ece, brier = calc_metrics(probs, targets, cfg.num_classes)
-            rows.append({"boost": bf, "seed": seed,
-                         "acc": acc, "nll": nll, "ece": ece, "brier": brier})
-            print(f"[boost={bf:>6} seed={seed}] acc={acc:.4f} nll={nll:.4f} "
+            rows.append({
+                "experiment": "boost_ablation_1d",
+                "split": split_tag,
+                "map_seed": int(cfg.seed),
+                "sampling_seed": int(seed),
+                "boost": float(bf),
+                "beta_perp": float(beta_fixed),
+                "lambda_base": float(base_val),
+                "prior_floor": 5.0,
+                "trl_k_perp": int(cfg.trl_k_perp),
+                "trl_steps": int(cfg.trl_steps),
+                "n_samples": int(n_samples),
+                "fixbn_batches": int(fix_bn_batches),
+                "acc": acc, "nll": nll, "ece": ece, "brier": brier,
+            })
+            print(f"[{split_tag} boost={bf:>6} sampling_seed={seed}] acc={acc:.4f} nll={nll:.4f} "
                   f"ece={ece:.4f} brier={brier:.4f}")
     agg = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rows:
         for m in ("acc", "nll", "ece", "brier"):
             agg[r["boost"]][m].append(r[m])
-    print(f"\n=== Boost ablation (mean +/- std over {len(seeds)} seeds, beta fixed at {beta_fixed}) ===")
+    print(f"\n=== Boost ablation [{split_tag}] (mean +/- std over {len(seeds)} sampling seeds, beta fixed at {beta_fixed}) ===")
     for bf in boosts:
         line = f"boost={bf:>6}: "
         for m in ("acc", "nll", "ece", "brier"):
@@ -1410,9 +1512,8 @@ def boost_ablation(trl, model, base_val, test_loader, bn_loader_aug, cfg,
 # Objetivo: testar se o "otimo agudo em c=50" do F.5 e um pico genuino no
 # plano (c, beta_perp) ou apenas um ponto numa cordilheira c*beta_perp ~ const.
 #
-# Como rodar: cole esta funcao em cifar100_all_methods_iclr.py, ao lado de
-# boost_ablation(), e dispare com a flag TEMP (mesmo padrao da boost_ablation):
-# Depois REVERTER:
+# Run with --run-boost-betaperp-sweep. The CLI constructs one spine and reuses
+# it across all cells in the requested (c, beta_perp) grid.
 #
 # Custo: ~1 spine + 9*3 = 27 amostragens em 1 checkpoint (seed 0). Barato,
 # porque spine e N0 NAO dependem de c nem de beta_perp (so a curvatura/HVPs
@@ -1420,18 +1521,9 @@ def boost_ablation(trl, model, base_val, test_loader, bn_loader_aug, cfg,
 # beta_perp e o multiplicador da escala. Por isso: construir UMA vez, varrer
 # so a amostragem.
 #
-# >>> 3 PONTOS A CONFIRMAR contra o seu codigo real (marcados [CONFIRM]) <<<
-#   (1) assinatura de build_trl_prior_from_laplace / como o backbone boost entra
-#   (2) como L_perp e montado a partir de (autovalores de curvatura + prior proj.)
-#   (3) a funcao de avaliacao que devolve acc/nll/ece/brier
-# Tudo isso ja existe na sua boost_ablation(); aqui so reaproveito os mesmos hooks.
+# The implementation below directly reuses the canonical prior projection,
+# transverse factors, sampler, FixBN path, and metric computation.
 # ============================================================================
-
-import os
-import csv
-import numpy as np
-import torch
-
 
 def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cfg,
                             c_grid=(25.0, 50.0, 100.0),
@@ -1473,15 +1565,29 @@ def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cf
                                              n_samples=n_samples,
                                              fix_bn_batches=fix_bn_batches)
                 acc, nll, ece, brier = calc_metrics(probs, targets, cfg.num_classes)
-                rows.append({"c": c, "beta": beta, "product": c * beta, "seed": seed,
-                             "acc": acc, "nll": nll, "ece": ece, "brier": brier})
-                print(f"[c={c:>6} beta={beta:>5} prod={c*beta:>6.0f} seed={seed}] "
+                rows.append({
+                    "experiment": "boost_beta_sweep_2d",
+                    "split": "test",
+                    "map_seed": int(cfg.seed),
+                    "sampling_seed": int(seed),
+                    "c": float(c),
+                    "beta_perp": float(beta),
+                    "product": float(c * beta),
+                    "lambda_base": float(base_val),
+                    "prior_floor": 5.0,
+                    "trl_k_perp": int(cfg.trl_k_perp),
+                    "trl_steps": int(cfg.trl_steps),
+                    "n_samples": int(n_samples),
+                    "fixbn_batches": int(fix_bn_batches),
+                    "acc": acc, "nll": nll, "ece": ece, "brier": brier,
+                })
+                print(f"[c={c:>6} beta={beta:>5} prod={c*beta:>6.0f} sampling_seed={seed}] "
                       f"acc={acc:.4f} nll={nll:.4f} ece={ece:.4f} brier={brier:.4f}")
 
     agg = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in rows:
         for m in ("acc", "nll", "ece", "brier"):
-            agg[(r["c"], r["beta"])][m].append(r[m])
+            agg[(r["c"], r["beta_perp"])][m].append(r[m])
 
     print(f"\n=== Sweep 2D (mean +/- std over {len(seeds)} seed(s)) -- grade ECE ===")
     print("   c \\ beta |" + "".join(f"  {b:>6}" for b in beta_grid))
@@ -1516,15 +1622,6 @@ def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cf
         print("  --> PICO CONJUNTO provavel: (50,4) nao reproduzido por produto igual. F.5 pode afirmar otimo.")
         print("      (Cheque se (25,8) colapsou: se sim, refuta multiplicatividade -> evidencia PRO estrutura.)")
 
-    import csv, os
-    out_csv = os.path.join(getattr(cfg, "out_dir", "."), "boost_betaperp_sweep.csv")
-    with open(out_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["c", "beta", "product", "seed", "acc", "nll", "ece", "brier"])
-        for r in rows:
-            w.writerow([r["c"], r["beta"], r["product"], r["seed"],
-                        r["acc"], r["nll"], r["ece"], r["brier"]])
-    print(f"\n[sweep2d] CSV salvo em {out_csv}")
     return rows
 
 if __name__ == '__main__':

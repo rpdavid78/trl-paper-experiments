@@ -1,79 +1,149 @@
-# TRL Paper Experiments
+# Tubular Riemannian Laplace experiments
 
-Experiment code release for **Tubular Riemannian Laplace (TRL)**, a post-hoc posterior approximation for Bayesian neural networks.
+Code release for **Tubular Riemannian Laplace Approximations for Bayesian
+Neural Networks (TRL)**. The repository contains the runnable experiment code,
+ablation and diagnostic entry points, aggregation utilities, and frozen Phase 1
+pre-registration used by the paper.
 
-This repository contains the code used for the CIFAR-100, CIFAR-100-C, ImageNet / ResNet-50 scale-check, toy, fine-tuning, architecture-sensitivity, calibration sanity-check, and diagnostic experiments reported in the paper.
+The release intentionally excludes datasets, trained checkpoints, cached
+spines/bases, raw logs, and generated result directories. Every required input
+and regeneration path is documented below and in `RELEASE_MANIFEST.md`.
 
-## Repository structure
+## Quick start
 
-```text
-scripts/
-  Main CIFAR-100 pipelines, architecture checks, CIFAR-100-C evaluation,
-  calibration sanity checks, result aggregation, and paper-asset utilities.
-
-ablation_scripts/
-  Sensitivity and ablation scripts for TRL hyperparameters and implementation choices.
-
-toy/
-  Small full-Hessian toy experiments isolating the longitudinal spine contribution.
-
-finetune/
-  CIFAR-100 to CIFAR-10 few-shot fine-tuning diagnostic.
-
-diagnostics/
-  Deterministic spine functional-disagreement diagnostics.
-
-phase1_prereg/
-  Pre-registered Phase 1 diagnostic materials, when included.
-
-assets/
-  Small figure assets used in the paper.
-
-docs/
-  Notes for paper tables, ablation protocols, and calibration sanity checks.
-
-requirements.txt
-  Minimal Python dependency list.
-
-RELEASE_MANIFEST.md
-  Short manifest describing the release contents.
-```
-
-## Main scripts
-
-### CIFAR-100 / ResNet-18 main benchmark
+The audited environment used Python 3.12.3. Create an environment from the
+repository root:
 
 ```bash
-python scripts/cifar100_all_methods_iclr.py --methods all --seed 0
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-This script contains the main CIFAR-100 experiment pipeline, including MAP, Laplace baselines, TRL, Deep Ensembles, SWAG-Diag, and MC-Dropout.
+The server used PyTorch 2.5.1 and torchvision 0.20.1 CUDA 12.1 builds. On a
+CUDA 12.1 machine, install the matching wheels first if the default resolver
+does not select them:
+
+```bash
+python -m pip install torch==2.5.1 torchvision==0.20.1 \
+  --index-url https://download.pytorch.org/whl/cu121
+python -m pip install -r requirements.txt
+```
+
+All commands below are run from the repository root. `--quick` is available on
+the main runners for smoke tests but must not be used for paper values.
+
+## Data
+
+| Dataset | Acquisition and expected placement | Downloaded by code? |
+| --- | --- | --- |
+| CIFAR-100 | `./data/cifar-100-python/` through torchvision | Yes |
+| CIFAR-10 | `./data/cifar-10-batches-py/` through torchvision | Yes |
+| SVHN | `./data/` through torchvision | Yes |
+| CIFAR-100-C | Extract the official archive anywhere; pass the extracted directory with `--cifar100c-root`. It must contain `labels.npy` and files such as `gaussian_noise.npy`. | No |
+| ImageNet-1k | Provide ImageFolder-style train and validation directories through `--train-root` and `--val-root`. | No |
+
+ImageNet is not redistributed because access is governed by the ImageNet terms
+and the dataset is very large. The code expects one class/synset directory per
+class under both roots. CIFAR-100-C is likewise kept outside Git because its
+arrays are large; the release contains no modified dataset copies.
+
+## Checkpoints and outputs
+
+The main CIFAR-100 runners train a missing MAP checkpoint and place all model
+artifacts below the selected `--ckpt-dir`. With the documented convention this
+is `checkpoints_c100_seed<seed>/`. The same directory subsequently supplies:
+
+- `resnet18_cifar100_map.pth` for MAP, Laplace, diagnostics, and fine-tuning;
+- ensemble, SWAG-Diag, and MC-Dropout checkpoints for their evaluations;
+- `c100_trl_stage2_spine.pth` for CIFAR-100-C and spine diagnostics.
+
+CIFAR-100-C evaluation normally reuses those checkpoints. Add
+`--train-missing-baselines` only when you deliberately want the evaluator to
+train a missing ensemble, SWAG-Diag, or MC-Dropout model.
+
+ImageNet uses the fixed torchvision `ResNet50_Weights.IMAGENET1K_V1` checkpoint;
+torchvision downloads it to its normal cache. The ImageNet scripts generate the
+last-layer prior fit, transverse bases, caches, and JSONL outputs locally.
+
+Generated files belong under `results/`, `checkpoints*/`, or another local path
+and are ignored by Git. Re-running a command never requires a checkpoint from
+the authors, but full regeneration is compute intensive.
+
+## Paper artifact map
+
+The table numbers refer to the current double-blind manuscript. Commands and
+exact protocols are expanded in the sections that follow.
+
+| Paper artifact | Entry point | Seeds / independent units | Inputs | Cost |
+| --- | --- | --- | --- | --- |
+| Tables 1, 6, and 10: clean CIFAR-100 and runtime | `scripts/cifar100_all_methods_iclr.py` | MAP seeds 0-4 | CIFAR-100, SVHN | Very heavy |
+| Tables 2, 11, and 12: CIFAR-100-C | `scripts/cifar100c_eval_iclr.py` | MAP seeds 0-2 | CIFAR-100-C plus CIFAR checkpoints | Heavy evaluation |
+| Tables 3-5 and toy plots | `toy/run_final_toy_tables.sh` | 30 sine seeds; 10 two-moons/spine seeds | Synthetic | Light to moderate |
+| Table 7: calibration sanity checks | `scripts/cifar100_laplace_prior_grid_iclr.py`, `scripts/cifar100_temperature_scaling_iclr.py` | MAP seeds 0-2 | CIFAR checkpoints | Moderate to heavy |
+| Tables 8-9: WRN-16-4 and VGG-11-BN | `scripts/cifar100_arch_sensitivity_iclr.py`, `scripts/vgg_all_methods_iclr.py` | seeds 42, 43, 44 | CIFAR-100, SVHN | Very heavy |
+| Tables 13-16 and sensitivity figures | main TRL runner plus `ablation_scripts/` | three reported repeats | CIFAR checkpoints/spines | Heavy to very heavy |
+| Table 15 / Figure 10: tube scale | `ablation_scripts/trl_tube_scale_sensitivity_cifar100.py` | seeds 0-2 in the released protocol | Stored TRL spine | Heavy evaluation |
+| Table 17: boost prior | main runner boost flags; `docs/table17_boost_ablation.md` | MAP seeds 0-2; repeats averaged within checkpoint | CIFAR checkpoints | Very heavy |
+| Tables 18-19: spine loss and functional drift | `diagnostics/spine_functional_disagreement_cifar100.py` | MAP seeds 0-4 | Stored MAP and spine | Moderate |
+| Table 20: stale eigenspace | `ablation_scripts/stale_eigenspace_study_cifar100.py` | seeds 0-2 | CIFAR checkpoints | Very heavy |
+| Table 21: transported vs fixed basis | `ablation_scripts/trl_fixed_basis_ablation_cifar100.py` | seeds 0-2 | Stored TRL spine | Heavy evaluation |
+| Table 22: single and fresh-refresh checks | `ablation_scripts/trl_refresh_single_ablation_cifar100.py` | seeds 0-2 | Stored TRL spine | Extremely heavy for fresh refresh |
+| Tables 23-24: CIFAR-10 fine-tuning/spine signal | `finetune/finetune_cifar10_spine_smoke.py` | seeds 0-9 | CIFAR-100 MAP checkpoints | Very heavy |
+| Tables 25-27: ImageNet scale-check | ImageNet scripts in `scripts/` | Table 25: seeds 0-2; Tables 26-27: seed-0 diagnostics | ImageNet train/val | Extremely heavy |
+| Table 28: diagnostic-control summary | synthesis of random-rank, FixBN, stale/fixed/fresh, and spine diagnostics | As above | As above | No separate run |
+
+Figure 1 is conceptual artwork rather than a generated experimental plot.
+Small generated LaTeX/PDF assets are rebuilt from local summaries with
+`scripts/make_paper_assets.py`; generated assets are not committed.
+
+## Main CIFAR-100 run
+
+Tables 1, 6, and 10 share the five-seed core runs:
+
+```bash
+for s in 0 1 2 3 4; do
+  python scripts/cifar100_all_methods_iclr.py \
+    --methods all \
+    --seed "$s" \
+    --ckpt-dir "checkpoints_c100_seed${s}" \
+    --results "results/cifar100_seed${s}_core.jsonl"
+done
+```
+
+This trains five Deep Ensemble members per MAP seed in addition to MAP,
+Laplace, SWAG-Diag, MC-Dropout, and TRL. To reproduce only a subset, replace
+`all` with one or more of `map ela lla trl deepens swag mcdo`.
+
+```bash
+python scripts/aggregate_results.py \
+  --input 'results/cifar100_seed*_core.jsonl' \
+  --group dataset architecture method \
+  --metrics acc nll ece brier auroc runtime_total_sec peak_vram_gb \
+  --out results/cifar100_clean_5seeds_summary.csv
+```
 
 ### SWAG-Diag protocol and FixBN audit
 
-The released baseline is **SWAG-Diag**: it stores the arithmetic mean and
-second moment of each parameter and samples a diagonal Gaussian. It does not
-include the low-rank deviation matrix of full SWAG. The canonical
-clean-benchmark runner
-[`scripts/cifar100_all_methods_iclr.py`](scripts/cifar100_all_methods_iclr.py)
-initializes SWAG-Diag from the MAP checkpoint regardless of whether Deep
-Ensemble ran earlier under `--methods all`. Together with the paired
-[`scripts/cifar100c_eval_iclr.py`](scripts/cifar100c_eval_iclr.py) evaluator, it
-uses the independent-reset FixBN option, the versioned cache format, and cache
-provenance validation against the complete MAP state_dict including BN buffers.
-Incompatible or provenance-free caches are rejected by default.
+The released baseline is **SWAG-Diag**: it stores per-parameter arithmetic
+means and second moments and samples a diagonal Gaussian. It does not include
+the low-rank deviation matrix of full SWAG. The canonical clean-benchmark
+runner, `scripts/cifar100_all_methods_iclr.py`, initializes SWAG-Diag from the
+MAP checkpoint even when Deep Ensemble ran earlier under `--methods all`.
 
-Those reset/cache/provenance guarantees are specific to the canonical runner,
-its exported mirror, and the CIFAR-100-C evaluator. Secondary architecture,
-VGG, and base runners, together with their noncanonical historical snapshot
-counterparts, received the MAP-initializer correction and `SWAG-Diag` result
-label only; they retain their own historical sampling, FixBN, and cache
-protocols and should not be assumed to accept the canonical runner's flags.
+The canonical runner and `scripts/cifar100c_eval_iclr.py` use the corrected
+independent-reset FixBN default, a versioned cache, and provenance validation
+against the complete MAP state_dict including BatchNorm buffers. The historical
+flattened snapshot received the corresponding SWAG-Diag corrections but is not
+a byte-for-byte mirror or the recommended execution surface. Secondary
+architecture, VGG, and base runners received the MAP-initializer correction and
+`SWAG-Diag` result label, but retain their historical sampling, FixBN, and cache
+protocols.
 
-The corrected default uses independent BatchNorm recalibration
-(`--swag-fixbn-mode reset`). The exact published CIFAR-100 SWAG-Diag protocol
-used 20 posterior samples, 20 FixBN batches, and the legacy rolling-buffer
-behavior. To reproduce that path with a known historical cache:
+The published five-seed SWAG-Diag row used 20 posterior samples, 20 FixBN
+batches, and rolling BatchNorm buffers. Reproduce that exact path only with a
+known historical cache:
 
 ```bash
 python scripts/cifar100_all_methods_iclr.py \
@@ -86,253 +156,261 @@ python scripts/cifar100_all_methods_iclr.py \
   --allow-legacy-swag-cache
 ```
 
-Do not use `--allow-legacy-swag-cache` for an unknown cache. Regenerate the
-versioned default cache instead. A paired seed-0 audit found negligible
-predictive differences between rolling and independent reset FixBN, so this
-correction does not require replacing the reported five-seed SWAG-Diag row.
-The protocol, metrics, and artifact hashes are recorded in
-[`docs/swag_diag_protocol.md`](docs/swag_diag_protocol.md).
-The paired audit runner is
-[`diagnostics/swag_fixbn_ab_cifar100.py`](diagnostics/swag_fixbn_ab_cifar100.py).
+Do not enable `--allow-legacy-swag-cache` for an unknown cache; regenerate the
+versioned default cache instead. A paired seed-0 audit found differences far
+below the predeclared escalation thresholds, so the FixBN correction does not
+require replacing the reported five-seed row. See
+`docs/swag_diag_protocol.md` for exact metrics and artifact hashes, and
+`diagnostics/swag_fixbn_ab_cifar100.py` for the paired audit runner.
 
-### CIFAR-100-C robustness
+## CIFAR-100-C
 
-```bash
-python scripts/cifar100c_eval_iclr.py
-```
-
-Evaluates trained methods on CIFAR-100-C corruptions and severities.
-
-### Calibration sanity checks
-
-The paper includes two reviewer-facing calibration controls for the CIFAR-100 clean benchmark: validation-NLL-tuned last-layer Laplace and MAP temperature scaling. These checks are documented in:
-
-```text
-docs/laplace_grid_temperature_scaling.md
-```
-
-Validation-NLL prior-grid check for ELA/LLA:
+Run this after the corresponding clean checkpoints exist:
 
 ```bash
 for s in 0 1 2; do
-  python scripts/cifar100_laplace_prior_grid_iclr.py \
-    --seed $s \
-    --ckpt-dir /path/to/checkpoints_c100_seed${s} \
-    --results results_iclr/cifar100_laplace_prior_grid.jsonl
+  python scripts/cifar100c_eval_iclr.py \
+    --cifar100c-root /path/to/CIFAR-100-C \
+    --seed "$s" \
+    --ckpt-dir "checkpoints_c100_seed${s}" \
+    --methods map ela lla trl deepens swag mcdo \
+    --trl-tube-scale 4 \
+    --results "results/cifar100c_seed${s}_main_ts4.jsonl"
 done
 ```
 
-MAP temperature scaling:
+The clean-validation-selected `beta_perp=4` is reused unchanged; no corrupted
+test data are used for tuning. Aggregate corruption/severity rows within each
+seed before taking the across-seed standard deviation:
 
 ```bash
-for s in 0 1 2; do
-  python scripts/cifar100_temperature_scaling_iclr.py \
-    --seed $s \
-    --ckpt-dir /path/to/checkpoints_c100_seed${s} \
-    --results results_iclr/cifar100_temperature_scaling.jsonl
+python scripts/aggregate_results.py \
+  --input 'results/cifar100c_seed*_main_ts4.jsonl' \
+  --group method \
+  --independent-unit seed \
+  --metrics acc nll ece brier \
+  --out results/cifar100c_main_ts4_3seeds_summary.csv
+```
+
+## Toy Tables 3-5
+
+The shell driver fixes every final-paper setting and is the canonical command:
+
+```bash
+bash toy/run_final_toy_tables.sh
+```
+
+It runs 30 seeds for noisy sine regression and 10 seeds for both two-moons and
+the spine-isolation comparison. Running `toy/rerun_toy_tables.py` without those
+arguments uses general-purpose defaults and is not the final-paper protocol.
+
+## Calibration Table 7
+
+For each `s` in `0 1 2`, run both checks against the same MAP checkpoint:
+
+```bash
+python scripts/cifar100_laplace_prior_grid_iclr.py \
+  --seed "$s" \
+  --ckpt-dir "checkpoints_c100_seed${s}" \
+  --results results/cifar100_laplace_prior_grid.jsonl
+
+python scripts/cifar100_temperature_scaling_iclr.py \
+  --seed "$s" \
+  --ckpt-dir "checkpoints_c100_seed${s}" \
+  --results results/cifar100_temperature_scaling.jsonl
+```
+
+See `docs/laplace_grid_temperature_scaling.md` for the selection rules and
+reported interpretation. Temperature scaling can optionally evaluate
+CIFAR-100-C with `--cifar100c-root`.
+
+## Architecture Tables 8-9
+
+```bash
+for s in 42 43 44; do
+  python scripts/cifar100_arch_sensitivity_iclr.py \
+    --arch wrn16_4 --methods map ela lla trl swag mcdo \
+    --seed "$s" --results "results/wrn16_4_seed${s}.jsonl"
+
+  python scripts/vgg_all_methods_iclr.py \
+    --methods map ela lla trl swag mcdo \
+    --seed "$s" --results "results/vgg11_bn_seed${s}.jsonl"
 done
 ```
 
-The Laplace grid check gives ELA/LLA the same held-out validation-NLL prior-selection criterion used for TRL scale selection. In the reported CIFAR-100 runs, validation tuning selects the upper boundary of the default prior-precision grid (`lambda = 1e4`), making ELA-grid and LLA-grid MAP-like rather than producing a stronger non-degenerate last-layer posterior. Temperature scaling is a strong scalar calibration baseline: it closes the clean NLL/Brier gap to TRL within seed-to-seed variability, while TRL retains the robust ECE advantage and provides posterior samples plus functional-variance diagnostics.
+`scripts/vgg_bn_cifar.py` contains the exact VGG-11-BN architecture used by the
+VGG runner, including its initialization and dropout placement.
 
-### Architecture-sensitivity checks
+## TRL ablations
+
+Rank, spine length, and FixBN grids used by Tables 13, 14, and 16 are:
+
+```text
+k_perp:       5, 10, 20, 30, 50
+spine steps:  5, 10, 20, 40
+FixBN batches: 1, 5, 10, 25
+```
+
+Run one forced value per output file with the main runner, keeping all other
+settings at their defaults. The tube-scale rerun for Table 15 / Figure 10 is
+fully specified in `docs/tube_scale_sameood_rerun.md` and uses:
 
 ```bash
-python scripts/cifar100_arch_sensitivity_iclr.py --arch wrn16_4
-python scripts/vgg_all_methods_iclr.py
+python ablation_scripts/trl_tube_scale_sensitivity_cifar100.py \
+  --seed 0 \
+  --ckpt-dir checkpoints_c100_seed0 \
+  --tube-scales 2 3 4 6 10 20 \
+  --n-samples 25 \
+  --fixbn-batches 25 \
+  --results results/tube_scale_sensitivity.jsonl
 ```
 
-These scripts reproduce the WideResNet-16-4 and VGG-11-BN architecture checks.
+Table 17 has dedicated, runnable 1D and 2D boost commands plus the required
+nested aggregation protocol in `docs/table17_boost_ablation.md`.
 
-### Toy spine-isolation experiments
+## Spine diagnostics
+
+Tables 18-19 use all points from the five stored spines:
 
 ```bash
-python toy/toy_spine_single_vs_full.py
+python diagnostics/spine_functional_disagreement_cifar100.py \
+  --seeds 0 1 2 3 4 \
+  --ckpt-root . \
+  --fixbn-batches 25 \
+  --out-dir results/spine_functional_disagreement
 ```
 
-Runs the original toy experiment comparing a MAP-centered single-checkpoint posterior with the full TRL spine. This script is kept as a legacy diagnostic. The final Tables 3--5 are reproduced by `toy/rerun_toy_tables.py` and `toy/run_final_toy_tables.sh`; see the final toy-table reproduction notes below.
-
-### Fine-tuning diagnostic
+Tables 20-22 use the following entry points for each seed in `0 1 2`:
 
 ```bash
-python finetune/finetune_cifar10_spine_smoke.py
+python ablation_scripts/stale_eigenspace_study_cifar100.py \
+  --seed 0 --ckpt-dir checkpoints_c100_seed0 \
+  --k 30 --steps 40 --fractions 0 0.25 0.5 0.75 1 \
+  --results results/stale_eigenspace.jsonl
+
+python ablation_scripts/trl_fixed_basis_ablation_cifar100.py \
+  --seed 0 --ckpt-dir checkpoints_c100_seed0 \
+  --results results/trl_basis_ablation.jsonl
+
+python ablation_scripts/trl_refresh_single_ablation_cifar100.py \
+  --seed 0 --ckpt-dir checkpoints_c100_seed0 \
+  --modes single fresh --include-ood \
+  --results results/trl_refresh_single.jsonl
 ```
 
-Runs the CIFAR-100 to CIFAR-10 few-shot fine-tuning diagnostic used to study when longitudinal spine movement contributes predictive variation.
+Fresh refresh recomputes an eigenspace at every selected spine point. Use
+`--fresh-max-points 5` only for a smoke test; the paper run uses all points.
 
-### Spine functional-disagreement diagnostic
+The random rank-30 negative control is documented in
+`docs/random_rank30_full_network_control.md` and implemented by
+`scripts/cifar100_random_rank30_baseline.py`.
+
+## Fine-tuning Tables 23-24
+
+The paper protocol fine-tunes for 50 epochs at learning rate 0.003 and uses a
+20-step, rank-30 spine with tube scale 0.1. Run seeds 0-9, supplying the matching
+CIFAR-100 source checkpoint:
 
 ```bash
-python diagnostics/spine_functional_disagreement_cifar100.py
+python finetune/finetune_cifar10_spine_smoke.py \
+  --seed 0 \
+  --c100-ckpt checkpoints_c100_seed0/resnet18_cifar100_map.pth \
+  --ft-mode full --ft-epochs 50 --ft-lr 0.003 \
+  --train-per-class 100 --val-per-class 100 \
+  --trl-steps 20 --trl-k 30 --trl-tube-scale 0.1 \
+  --pred-samples 25 --fixbn-batches 25 \
+  --out results/finetune_spine/seed0.jsonl
 ```
 
-Measures deterministic functional drift along the stored TRL spine using validation-set disagreement, Jensen--Shannon divergence, and loss drift.
+The frozen Phase 1 hypothesis and decision rule are preserved under
+`phase1_prereg/`. Raw Phase 1 outputs and caches are intentionally excluded.
 
-## Environment
+## ImageNet Tables 25-27
 
-A minimal dependency list is provided in `requirements.txt`.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-The experiments were run with PyTorch, torchvision, scipy, scikit-learn, pandas, matplotlib, and laplace-torch. GPU execution is recommended for all CIFAR-scale experiments.
-
-## Data
-
-The scripts use standard public datasets such as CIFAR-100, CIFAR-10, SVHN, CIFAR-100-C, and ImageNet. Dataset downloads are handled by the scripts or expected to be placed in a local data directory. Large datasets, including ImageNet, are not included in this repository.
-
-## Checkpoints and results
-
-Large checkpoints, raw logs, cached TRL spines, and raw result files are intentionally not included in this code release.
-
-The repository is intended to provide:
-
-* the experiment code,
-* the implementation details,
-* the ablation and diagnostic scripts,
-* the calibration sanity-check scripts,
-* and the structure needed to reproduce the reported experiments.
-
-## TRL implementation notes
-
-The practical TRL implementation uses two support axes around a fixed MAP checkpoint:
-
-* a low-rank, full-network transverse subspace selected by stochastic Fisher/GGN-style curvature-vector products,
-* a discrete low-loss spine representing longitudinal support,
-* validation-selected tube scale,
-* transported transverse structure along the spine,
-* and BatchNorm recalibration when applicable.
-
-The central scalability cut is rank restriction with full-network access, rather than restricting uncertainty to the final layer. The transverse subspace carries most of the gain around deeply trained CIFAR-scale checkpoints, while the spine is used to represent longitudinal support and to diagnose when a low-loss corridor carries additional functional variation. The toy and few-shot fine-tuning diagnostics are included to characterize this regime dependence.
-
-The large-network TRL prior is block-isotropic: classifier-head parameters receive the base precision inherited from the last-layer Laplace fit, while non-head parameters receive a boosted backbone precision. The backbone prior-boost coefficient `c=50` is selected on a held-out clean validation split by validation NLL from a small sweep over `c`, and is then confirmed on the test split. The tube scale `beta_perp` is likewise selected on the held-out clean validation split by validation NLL in the CIFAR-scale pipeline. The Table 16 sweeps report both validation and test sensitivity for the boost, showing that the no-boost setting collapses and that the boost factor and tube scale do not reduce to a single effective product.
-
-## Table 14 tube-scale sensitivity rerun
-
-The final Table 14 / Figure 9 tube-scale sensitivity values are documented in:
-
-```text
-docs/tube_scale_sameood_rerun.md
-```
-
-This note records the rerun using the same test/OOD evaluation path as the other CIFAR-100 ablations. The final sweep uses:
-
-```text
-beta_perp in {2.0, 3.0, 4.0, 6.0, 10.0, 20.0}
-seed in {0, 1, 2}
-k_perp = 30, T = 40, step_size = 0.01, FixBN batches = 25, S = 25
-```
-
-For each `beta_perp`, the script is run with a single-value `--trl-tube-scales <beta_perp>` argument so that the reported row is the final test/OOD evaluation for that forced scale. The selected main scale remains `beta_perp = 4.0`, selected by validation NLL; it also gives the best ECE and Brier in this sweep.
-
-## Random rank-30 full-network control
-
-The random full-network rank-30 diagnostic control used in the appendix text is documented in:
-
-```text
-docs/random_rank30_full_network_control.md
-```
-
-This control replaces the Fisher/GGN-selected TRL transverse subspace by a random rank-30 orthonormal full-network subspace, while keeping the block prior, FixBN protocol, `S=25`, and validation-selected tube scale unchanged. Across five random bases on one MAP checkpoint and one-basis controls on two additional MAP checkpoints, the random posterior stays MAP-like and selects the largest value in the original beta grid. A provenance-clean extension to `beta_perp=40` remains MAP-like and only weakly improves validation NLL, supporting the interpretation that the calibration gain comes from Fisher/GGN-selected transverse directions rather than from full-network access alone.
-
-## Table 16 boost-prior ablation
-
-The code and notes for the TRL backbone-prior boost ablation are provided in:
-
-```text
-docs/table16_boost_ablation.md
-```
-
-This documents both parts of Table 16:
-
-* the 1D boost sweep at fixed validation-selected `beta_perp = 4`, including validation and test NLL/ECE and the no-boost `c=0` case;
-* the joint `c x beta_perp` sweep showing that the prior boost and tube scale are not reducible to a single effective product.
-
-The relevant implementation is in:
-
-```text
-scripts/cifar100_all_methods_iclr.py
-```
-
-with the functions:
-
-```text
-boost_ablation(...)
-boost_betaperp_sweep_2d(...)
-```
-
-For Panel A, `c=50` is selected by validation NLL on the held-out clean validation split and confirmed on the test split; it is not selected from test metrics. Panel B is a sensitivity analysis demonstrating that `c` and `beta_perp` do not collapse to a single effective product.
-
-## Reproducibility notes
-
-The paper experiments use multiple regimes:
-
-1. CIFAR-100 from scratch,
-2. CIFAR-100-C robustness,
-3. ImageNet / ResNet-50 scale-check,
-4. toy full-Hessian diagnostics,
-5. CIFAR-100 to CIFAR-10 few-shot fine-tuning,
-6. WideResNet-16-4 and VGG-11-BN architecture checks,
-7. spine functional-disagreement diagnostics,
-8. TRL hyperparameter and implementation ablations,
-9. calibration sanity checks for last-layer Laplace tuning and MAP temperature scaling.
-
-Exact command lines depend on local data and checkpoint paths. The scripts expose CLI arguments for seeds, checkpoint directories, data roots, ImageNet train/validation roots, TRL rank, spine length, tube scale, FixBN batches and mode, SWAG-Diag sampling/cache provenance, and output paths.
-
-## Final toy-table reproduction notes
-
-The final toy Tables 3--5 are reproduced by the consolidated toy runner:
-
-```text
-toy/rerun_toy_tables.py
-toy/run_final_toy_tables.sh
-```
-
-## ImageNet / ResNet-50 scale-check
-
-The ImageNet / ResNet-50 experiment is included as a scale-check, not as the main benchmark. It uses a fixed torchvision ResNet-50 pretrained checkpoint (`IMAGENET1K_V1`), ImageNet train batches for last-layer marglik, HVP, and FixBN, and a mechanical split of the official validation set into `val_tuning_25k` and `val_test_25k`.
-
-The protocol is documented in:
-
-```text
-docs/imagenet_resnet50_scalecheck.md
-```
-
-Main scripts:
+First estimate the last-layer marginal-likelihood precision:
 
 ```bash
 python scripts/imagenet_marglik_fit.py \
-  --train-root <imagenet_train_root> \
+  --train-root /path/to/imagenet/train \
   --out-dir results/imagenet_resnet50_scalecheck \
   --seeds 0 1 2
+```
 
+Then reproduce the three-seed single-checkpoint scale-check (Table 25):
+
+```bash
 python scripts/imagenet_resnet50_scalecheck.py \
-  --train-root <imagenet_train_root> \
-  --val-root <imagenet_val_root> \
+  --train-root /path/to/imagenet/train \
+  --val-root /path/to/imagenet/val \
   --out-dir results/imagenet_resnet50_scalecheck \
-  --seeds 0 1 2 \
-  --rank 30 \
-  --samples 25 \
-  --fixbn-batches 25 \
-  --hvp-batches 5 \
-  --boost-c 50 150 450 \
-  --betas 0.5 1 1.5 2 3 4 \
+  --seeds 0 1 2 --rank 30 --samples 25 \
+  --fixbn-batches 25 --hvp-batches 5 \
+  --boost-c 50 150 450 --betas 0.5 1 1.5 2 3 4 \
   --spine-steps 0
 ```
 
-Large ImageNet datasets, cached bases, raw JSONL files, checkpoints, and generated result files are not included in the release.
+Tables 26-27 are seed-0 spine-length and rank diagnostics. Their exact grids,
+selection split, cache behavior, and memory notes are in
+`docs/imagenet_resnet50_scalecheck.md`.
 
-## Random rank-30 subspace control
+## Aggregation and paper assets
 
-The random rank-30 baseline is a negative control for the TRL transverse subspace. It tests whether a generic random low-rank subspace gives the same behavior as the TRL geometry-aware transverse subspace.
+`scripts/aggregate_results.py` computes sample standard deviations (`ddof=1`).
+For nested runs such as Table 17 or CIFAR-100-C, use `--independent-unit` to
+average stochastic/corruption rows inside each independent seed first.
 
-Main script:
+After creating the expected summary CSV names documented above, generate the
+small LaTeX tables and PDF plots with:
 
-```text
-scripts/cifar100_random_rank30_baseline.py
+```bash
+python scripts/make_paper_assets.py \
+  --results-root results \
+  --out-dir results/paper_assets
 ```
 
-This is a diagnostic/control experiment, not a replacement for TRL.
+The command reports missing optional inputs and builds every asset whose source
+summary is present. `--help` is side-effect free.
+
+## Compute expectations
+
+The audited server had two NVIDIA RTX 6000 Ada Generation GPUs with 49,140 MiB
+VRAM each (driver 610.43.02). Individual scripts generally use one GPU unless
+the surrounding launcher schedules independent seeds across devices.
+
+| Regime | Practical expectation |
+| --- | --- |
+| Toy experiments | CPU or one GPU; minutes to hours depending on final seeds |
+| Temperature scaling | One GPU; mostly checkpoint inference |
+| Main CIFAR-100 `all` | Multiple long training/post-hoc stages per seed; budget GPU-days for all five seeds |
+| TRL rank/spine/fresh diagnostics | HVP/Lanczos dominated; fresh refresh is the most expensive CIFAR diagnostic |
+| VGG/WRN architecture checks | Full independent training and TRL construction per seed |
+| ImageNet rank/spine diagnostics | High memory and I/O; rank-30 basis is about 3.1 GB in fp32 and high-rank Lanczos needs substantially more workspace |
+
+Exact runtime is hardware and storage dependent. Table 10 is generated from
+the instrumented `runtime_total_sec`, stage timings, FixBN overhead, and
+`peak_vram_gb` fields rather than from estimates in this README.
+
+## Repository layout
+
+```text
+scripts/             Canonical CIFAR/ImageNet runners and aggregation tools
+ablation_scripts/    TRL sensitivity and transported/fresh-basis diagnostics
+diagnostics/         Deterministic spine loss and functional-drift evaluation
+finetune/            CIFAR-100 to CIFAR-10 small-data fine-tuning experiment
+toy/                 Final toy table runner and legacy spine-isolation runner
+docs/                Protocol notes and reported sanity-check outcomes
+phase1_prereg/       Frozen Phase 1 pre-registration provenance
+```
+
+`scripts/all_exported_code_snapshot/` is a provenance snapshot of the earlier
+flattened export, not the recommended execution surface. Use the top-level
+scripts listed above; compatibility shims in the snapshot point back to the
+canonical implementations.
+
+## Release and citation status
+
+This is a double-blind review release, so author-identifying citation metadata
+is intentionally not committed. A `CITATION.cff` and archival release tag should
+be added after de-anonymization. See `LICENSE` for the current reuse terms; the
+repository is publicly readable but the present all-rights-reserved license is
+not an OSI open-source license.

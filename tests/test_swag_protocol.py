@@ -312,19 +312,13 @@ class SWAGCacheTests(unittest.TestCase):
         self.assertTrue(cfg.allow_legacy_swag_cache)
 
 
-class SnapshotTests(unittest.TestCase):
-    def test_canonical_files_match_exported_snapshot(self):
-        pairs = [
-            ("cifar100_all_methods_iclr.py", "cifar100_all_methods_iclr.py"),
-            ("cifar100_all_methods_base.py", "cifar100_all_methods_base.py"),
-            ("cifar100c_eval_iclr.py", "cifar100c_eval_iclr.py"),
-            ("make_paper_assets.py", "make_paper_assets.py"),
-        ]
-        snapshot = ROOT / "scripts" / "all_exported_code_snapshot"
-        for canonical_name, snapshot_name in pairs:
-            canonical = ROOT / "scripts" / canonical_name
-            exported = snapshot / snapshot_name
-            self.assertEqual(canonical.read_bytes(), exported.read_bytes(), canonical_name)
+class SnapshotPolicyTests(unittest.TestCase):
+    def test_exported_snapshot_is_explicitly_historical(self):
+        policy = (
+            ROOT / "scripts" / "all_exported_code_snapshot" / "README.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Historical exported-code snapshot", policy)
+        self.assertIn("not the canonical execution surface", policy)
 
 
 if __name__ == "__main__":

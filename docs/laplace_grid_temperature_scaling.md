@@ -1,4 +1,4 @@
-# Laplace prior-grid and temperature-scaling checks
+# Table 7: Laplace prior-grid and temperature-scaling checks
 
 This note documents two reviewer-facing calibration sanity checks for the CIFAR-100 experiments.
 

@@ -1,8 +1,12 @@
-torch
-torchvision
-numpy
-pandas
-scipy
-scikit-learn
-matplotlib
-laplace-torch
+# Environment used for the release audit (Python 3.12.3).
+# The server used CUDA 12.1 builds of torch/torchvision; install the matching
+# CUDA wheels for your platform before or while resolving this file.
+torch==2.5.1
+torchvision==0.20.1
+numpy==1.26.4
+pandas==3.0.3
+scipy==1.17.1
+scikit-learn==1.8.0
+matplotlib==3.10.9
+pillow==12.2.0
+laplace-torch==0.2.2.2
