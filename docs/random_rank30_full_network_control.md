@@ -16,6 +16,8 @@ The control replaces the Fisher/GGN-selected TRL transverse subspace with a rand
 - rank `30`;
 - `S=25` predictive samples;
 - FixBN with 25 batches;
+- explicit `--fixbn-mode rolling` for reproduction of the reported control
+  (`reset` is available for the corrected independent-refresh protocol);
 - validation-selected tube scale;
 - original scale grid `beta_perp in {2,3,4,6,10,20}` plus one provenance-clean extension to `beta_perp=40` for basis seed 9000 on MAP seed 0.
 

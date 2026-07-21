@@ -163,6 +163,25 @@ require replacing the reported five-seed row. See
 `docs/swag_diag_protocol.md` for exact metrics and artifact hashes, and
 `diagnostics/swag_fixbn_ab_cifar100.py` for the paired audit runner.
 
+### TRL FixBN protocol and audit
+
+The reported TRL row used 25 posterior samples, 25 augmented FixBN batches per
+sample, and historical `rolling` BatchNorm buffers. The canonical runner now
+uses independent `reset` FixBN by default: it clears BN statistics for every
+posterior draw, accumulates the calibration batches with `momentum=None`, and
+restores the original momentum afterward. Use `--trl-fixbn-mode rolling` only
+to reproduce the historical path.
+
+A paired seed-0 audit included the full validation-scale sweep, the
+sweep-to-test state transition, ID/OOD evaluation, reversed draw order, and a
+reversed beta grid. Both modes selected beta 4. In the complete pipeline, the
+absolute changes were `0.000827` NLL, `0.002321` ECE, `0.000024` Brier,
+`0.000500` accuracy, and `0.002487` entropy AUROC, all below the predeclared
+escalation thresholds. Independent reset was exactly invariant to both order
+controls. No five-seed rerun is required. See `docs/trl_fixbn_protocol.md` for
+the command, exact tables, limitations, and artifact hashes, and
+`diagnostics/trl_fixbn_ab_cifar100.py` for the audit runner.
+
 ## CIFAR-100-C
 
 Run this after the corresponding clean checkpoints exist:

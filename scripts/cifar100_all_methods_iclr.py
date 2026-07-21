@@ -128,6 +128,9 @@ class CFG:
     trl_eta: float = 1e-3
     trl_val_samples: int = 25
     trl_fixbn_batches: int = 25
+    # ``reset`` makes every posterior draw's BN recalibration independent.
+    # ``rolling`` reproduces the originally reported path-dependent run.
+    trl_fixbn_mode: str = "reset"
     trl_tube_scales: Tuple[float, ...] = (2.0, 3.0, 4.0, 6.0, 10.0, 20.0)
 
     # TRL numerics / safety
@@ -978,7 +981,14 @@ class PracticalTRLStage2:
             if (t % 5) == 0:
                 cleanup()
 
-    def predict(self, loader, bn_loader_aug, n_samples: int, fix_bn_batches: int):
+    def predict(
+        self,
+        loader,
+        bn_loader_aug,
+        n_samples: int,
+        fix_bn_batches: int,
+        fix_bn_mode: str = "rolling",
+    ):
         """Posterior prediction for the practical discrete TRL approximation.
 
         The implemented longitudinal rule samples uniformly over stored spine
@@ -1017,7 +1027,7 @@ class PracticalTRLStage2:
                 DEVICE,
                 num_batches=fix_bn_batches,
                 return_elapsed=True,
-                mode="rolling",
+                mode=fix_bn_mode,
             )
             fixbn_total += float(elapsed or 0.0)
 
@@ -1130,7 +1140,10 @@ def trl_stage2_run(model_map, base_val, bn_loader_clean, tr_loader_aug, val_load
         import sys; sys.exit(0)
 
     # sweep in VAL with fixed seed by tube_scale (same as yours)
-    print(f"\n>>> [TRL Stage-2 SWEEP] n_samples={cfg.trl_val_samples}, fix_bn_batches={cfg.trl_fixbn_batches}")
+    print(
+        f"\n>>> [TRL Stage-2 SWEEP] n_samples={cfg.trl_val_samples}, "
+        f"fix_bn_batches={cfg.trl_fixbn_batches}, fix_bn_mode={cfg.trl_fixbn_mode}"
+    )
     best_nll = float("inf")
     best_ts = None
     sweep = []
@@ -1152,6 +1165,7 @@ def trl_stage2_run(model_map, base_val, bn_loader_clean, tr_loader_aug, val_load
                     bn_loader_aug=tr_loader_aug,
                     n_samples=cfg.trl_val_samples,
                     fix_bn_batches=cfg.trl_fixbn_batches,
+                    fix_bn_mode=cfg.trl_fixbn_mode,
                 )
                 p_val = p_val.clamp(1e-7, 1.0)
                 nll = nn.NLLLoss()(torch.log(p_val), t_val.long()).item()
@@ -1187,12 +1201,24 @@ def trl_stage2_run(model_map, base_val, bn_loader_clean, tr_loader_aug, val_load
 
     trl.reset_accounting()
     with StageTimer("trl_test_posterior_prediction", trl_timings):
-        p_trl, t_ts = trl.predict(ts_loader, bn_loader_aug=tr_loader_aug, n_samples=cfg.trl_val_samples, fix_bn_batches=cfg.trl_fixbn_batches)
+        p_trl, t_ts = trl.predict(
+            ts_loader,
+            bn_loader_aug=tr_loader_aug,
+            n_samples=cfg.trl_val_samples,
+            fix_bn_batches=cfg.trl_fixbn_batches,
+            fix_bn_mode=cfg.trl_fixbn_mode,
+        )
     trl_timings["trl_test_fixbn_overhead"] = {"wall_sec": float(trl.last_predict_fixbn_sec), "peak_vram_gb": 0.0}
 
     trl.reset_accounting()
     with StageTimer("trl_ood_posterior_prediction", trl_timings):
-        p_trl_ood, _ = trl.predict(ood_loader, bn_loader_aug=tr_loader_aug, n_samples=cfg.trl_val_samples, fix_bn_batches=cfg.trl_fixbn_batches)
+        p_trl_ood, _ = trl.predict(
+            ood_loader,
+            bn_loader_aug=tr_loader_aug,
+            n_samples=cfg.trl_val_samples,
+            fix_bn_batches=cfg.trl_fixbn_batches,
+            fix_bn_mode=cfg.trl_fixbn_mode,
+        )
     trl_timings["trl_ood_fixbn_overhead"] = {"wall_sec": float(trl.last_predict_fixbn_sec), "peak_vram_gb": 0.0}
 
     return p_trl, p_trl_ood, sweep, best_ts, best_nll, trl_timings
@@ -1225,6 +1251,7 @@ def _metrics_row(dataset: str, architecture: str, method: str, seed: int, probs_
         'trl_steps': int(cfg.trl_steps),
         'trl_step_size': float(cfg.trl_step_size),
         'trl_fixbn_batches': int(cfg.trl_fixbn_batches),
+        'trl_fixbn_mode': cfg.trl_fixbn_mode,
         'trl_hvp_batches': int(cfg.trl_hvp_batches),
         'ood_score': 'predictive_entropy',
     }
@@ -1348,6 +1375,8 @@ def parse_args():
     p.add_argument('--trl-step-size', type=float, default=None)
     p.add_argument('--trl-hvp-batches', type=int, default=None)
     p.add_argument('--trl-fixbn-batches', type=int, default=None)
+    p.add_argument('--trl-fixbn-mode', choices=['rolling', 'reset'], default=None,
+                   help='TRL BN refresh: reset (corrected default) or rolling (published run).')
     p.add_argument('--trl-val-samples', type=int, default=None)
     p.add_argument('--trl-tube-scales', type=float, nargs='*', default=None)
     p.add_argument('--swag-epochs', type=int, default=None)
@@ -1397,6 +1426,7 @@ def cfg_from_args(args) -> CFG:
     if args.trl_step_size is not None: cfg.trl_step_size = args.trl_step_size
     if args.trl_hvp_batches is not None: cfg.trl_hvp_batches = args.trl_hvp_batches
     if args.trl_fixbn_batches is not None: cfg.trl_fixbn_batches = args.trl_fixbn_batches
+    if args.trl_fixbn_mode is not None: cfg.trl_fixbn_mode = args.trl_fixbn_mode
     if args.trl_val_samples is not None: cfg.trl_val_samples = args.trl_val_samples
     if args.trl_tube_scales is not None and len(args.trl_tube_scales) > 0:
         cfg.trl_tube_scales = tuple(args.trl_tube_scales)
@@ -1410,6 +1440,8 @@ def cfg_from_args(args) -> CFG:
         raise ValueError("--swag-samples must be positive")
     if cfg.swag_fixbn_batches < 1:
         raise ValueError("--swag-fixbn-batches must be positive")
+    if cfg.trl_fixbn_batches < 1:
+        raise ValueError("--trl-fixbn-batches must be positive")
     cfg.run_boost_ablation = args.run_boost_ablation
     cfg.run_boost_betaperp_sweep = args.run_boost_betaperp_sweep
     cfg.boost_results = args.boost_results
@@ -1472,7 +1504,8 @@ def boost_ablation(trl, model, base_val, eval_loader, bn_loader_aug, cfg,
             probs, targets = trl.predict(loader=eval_loader,
                                          bn_loader_aug=bn_loader_aug,
                                          n_samples=n_samples,
-                                         fix_bn_batches=fix_bn_batches)
+                                         fix_bn_batches=fix_bn_batches,
+                                         fix_bn_mode=cfg.trl_fixbn_mode)
             acc, nll, ece, brier = calc_metrics(probs, targets, cfg.num_classes)
             rows.append({
                 "experiment": "boost_ablation_1d",
@@ -1487,6 +1520,7 @@ def boost_ablation(trl, model, base_val, eval_loader, bn_loader_aug, cfg,
                 "trl_steps": int(cfg.trl_steps),
                 "n_samples": int(n_samples),
                 "fixbn_batches": int(fix_bn_batches),
+                "fixbn_mode": cfg.trl_fixbn_mode,
                 "acc": acc, "nll": nll, "ece": ece, "brier": brier,
             })
             print(f"[{split_tag} boost={bf:>6} sampling_seed={seed}] acc={acc:.4f} nll={nll:.4f} "
@@ -1563,7 +1597,8 @@ def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cf
                 probs, targets = trl.predict(loader=test_loader,
                                              bn_loader_aug=bn_loader_aug,
                                              n_samples=n_samples,
-                                             fix_bn_batches=fix_bn_batches)
+                                             fix_bn_batches=fix_bn_batches,
+                                             fix_bn_mode=cfg.trl_fixbn_mode)
                 acc, nll, ece, brier = calc_metrics(probs, targets, cfg.num_classes)
                 rows.append({
                     "experiment": "boost_beta_sweep_2d",
@@ -1579,6 +1614,7 @@ def boost_betaperp_sweep_2d(trl, model, base_val, test_loader, bn_loader_aug, cf
                     "trl_steps": int(cfg.trl_steps),
                     "n_samples": int(n_samples),
                     "fixbn_batches": int(fix_bn_batches),
+                    "fixbn_mode": cfg.trl_fixbn_mode,
                     "acc": acc, "nll": nll, "ece": ece, "brier": brier,
                 })
                 print(f"[c={c:>6} beta={beta:>5} prod={c*beta:>6.0f} sampling_seed={seed}] "

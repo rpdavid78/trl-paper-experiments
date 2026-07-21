@@ -180,6 +180,7 @@ def predict_random_lowrank(
     beta,
     n_samples,
     fix_bn_batches,
+    fix_bn_mode,
     mc_seed,
     basis_device,
 ):
@@ -226,6 +227,7 @@ def predict_random_lowrank(
             base.DEVICE,
             num_batches=fix_bn_batches,
             return_elapsed=True,
+            mode=fix_bn_mode,
         )
         fixbn_total += float(elapsed or 0.0)
 
@@ -323,6 +325,7 @@ def run_random_rank_baseline(cfg, args):
                 beta=float(beta),
                 n_samples=cfg.trl_val_samples,
                 fix_bn_batches=cfg.trl_fixbn_batches,
+                fix_bn_mode=cfg.trl_fixbn_mode,
                 mc_seed=args.val_mc_seed,
                 basis_device=args.basis_device,
             )
@@ -354,6 +357,7 @@ def run_random_rank_baseline(cfg, args):
             beta=best_beta,
             n_samples=cfg.trl_val_samples,
             fix_bn_batches=cfg.trl_fixbn_batches,
+            fix_bn_mode=cfg.trl_fixbn_mode,
             mc_seed=args.test_mc_seed,
             basis_device=args.basis_device,
         )
@@ -371,6 +375,7 @@ def run_random_rank_baseline(cfg, args):
             beta=best_beta,
             n_samples=cfg.trl_val_samples,
             fix_bn_batches=cfg.trl_fixbn_batches,
+            fix_bn_mode=cfg.trl_fixbn_mode,
             mc_seed=args.ood_mc_seed,
             basis_device=args.basis_device,
         )
@@ -402,6 +407,7 @@ def run_random_rank_baseline(cfg, args):
         "prior_floor": float(args.prior_floor),
         "samples": int(cfg.trl_val_samples),
         "fixbn_batches": int(cfg.trl_fixbn_batches),
+        "trl_fixbn_mode": cfg.trl_fixbn_mode,
         "hvp_batches": int(cfg.trl_hvp_batches),
         "rayleigh_mean": float(posterior["rayleigh"].mean().item()),
         "rayleigh_max": float(posterior["rayleigh"].max().item()),
@@ -451,6 +457,10 @@ def parse_args():
     p.add_argument("--trl-tube-scales", type=float, nargs="*", default=None)
     p.add_argument("--samples", type=int, default=25)
     p.add_argument("--fixbn-batches", type=int, default=25)
+    p.add_argument(
+        "--fixbn-mode", choices=["rolling", "reset"], default="rolling",
+        help="BatchNorm refresh mode; rolling reproduces the reported control.",
+    )
     p.add_argument("--hvp-batches", type=int, default=5)
 
     p.add_argument("--batch-size", type=int, default=None)
@@ -480,6 +490,7 @@ def cfg_from_args(args):
     cfg.trl_k_perp = int(args.rank)
     cfg.trl_val_samples = int(args.samples)
     cfg.trl_fixbn_batches = int(args.fixbn_batches)
+    cfg.trl_fixbn_mode = args.fixbn_mode
     cfg.trl_hvp_batches = int(args.hvp_batches)
 
     if args.trl_tube_scales is not None and len(args.trl_tube_scales) > 0:

@@ -168,6 +168,10 @@ def main():
     ap.add_argument("--batch-size", type=int, default=128)
     ap.add_argument("--num-workers", type=int, default=2)
     ap.add_argument("--fixbn-batches", type=int, default=25)
+    ap.add_argument(
+        "--fixbn-mode", choices=["rolling", "reset"], default="rolling",
+        help="BatchNorm refresh mode; rolling reproduces the reported diagnostic.",
+    )
     ap.add_argument("--max-points", type=int, default=0, help="0 means all stored spine points; e.g. 5 for quick diagnostic")
     ap.add_argument("--modes", nargs="+", default=["fixbn"], choices=["raw", "fixbn"])
     args = ap.parse_args()
@@ -213,7 +217,12 @@ def main():
                 theta_cpu = spine[idx]["theta"] if isinstance(spine[idx], dict) else spine[idx]
                 set_model_to_theta(model, map_state_cpu, theta_cpu)
                 if mode == "fixbn":
-                    fix_bn(model, train_aug_loader, DEVICE, num_batches=args.fixbn_batches, return_elapsed=False)
+                    fix_bn(
+                        model, train_aug_loader, DEVICE,
+                        num_batches=args.fixbn_batches,
+                        return_elapsed=False,
+                        mode=args.fixbn_mode,
+                    )
                 probs, y, ce = collect_probs_and_labels(model, val_loader)
                 if j == 0:
                     base_probs = probs
@@ -225,6 +234,7 @@ def main():
                 row = {
                     "seed": seed,
                     "mode": mode,
+                    "fixbn_mode": args.fixbn_mode if mode == "fixbn" else "none",
                     "spine_index": idx,
                     "spine_fraction": frac,
                     "val_ce": ce,
@@ -248,7 +258,13 @@ def main():
             # exclude first point for mean disagreement if desired? We report both all and nonzero path means.
             nonzero = [r for r in mode_rows if r["spine_index"] != idxs[0]] or mode_rows
             for rows, suffix in [(mode_rows, "all"), (nonzero, "nonzero")]:
-                out = {"seed": seed, "mode": mode, "subset": suffix, "n_points_eval": len(rows)}
+                out = {
+                    "seed": seed,
+                    "mode": mode,
+                    "fixbn_mode": args.fixbn_mode if mode == "fixbn" else "none",
+                    "subset": suffix,
+                    "n_points_eval": len(rows),
+                }
                 for m in [
                     "top1_disagreement",
                     "mean_js",
@@ -284,9 +300,17 @@ def main():
     grouped = defaultdict(list)
     for r in per_seed_rows:
         grouped[(r["mode"], r["subset"])].append(r)
-    metrics = [k for k in per_seed_rows[0].keys() if k not in ["seed", "mode", "subset", "n_points_eval"]]
+    metrics = [
+        k for k in per_seed_rows[0].keys()
+        if k not in ["seed", "mode", "fixbn_mode", "subset", "n_points_eval"]
+    ]
     for (mode, subset), rows in grouped.items():
-        out = {"mode": mode, "subset": subset, "n": len(rows)}
+        out = {
+            "mode": mode,
+            "fixbn_mode": rows[0]["fixbn_mode"],
+            "subset": subset,
+            "n": len(rows),
+        }
         for m in metrics:
             vals = np.array([float(r[m]) for r in rows], dtype=float)
             out[m + "_mean"] = float(vals.mean())

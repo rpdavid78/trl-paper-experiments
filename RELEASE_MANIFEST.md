@@ -16,10 +16,10 @@ current paper tables and figures.
 - `scripts/imagenet_marglik_fit.py` and `scripts/imagenet_resnet50_scalecheck.py`: ImageNet/ResNet-50 scale-check.
 - `scripts/aggregate_results.py` and `scripts/make_paper_assets.py`: aggregation and generated-asset utilities.
 - `ablation_scripts/`: rank/spine/tube/FixBN, fixed-basis, stale-eigenspace, and fresh-refresh diagnostics.
-- `diagnostics/`: deterministic spine loss and functional-disagreement analysis, including the paired SWAG-Diag FixBN audit.
+- `diagnostics/`: deterministic spine loss and functional-disagreement analysis, including paired SWAG-Diag and TRL FixBN audits.
 - `finetune/`: CIFAR-100 to CIFAR-10 small-data fine-tuning diagnostics.
 - `toy/`: final toy-table driver and underlying toy implementations.
-- `docs/`: protocol notes, grids, commands, and reported sanity-check outcomes, including `docs/swag_diag_protocol.md`.
+- `docs/`: protocol notes, grids, commands, and reported sanity-check outcomes, including `docs/swag_diag_protocol.md` and `docs/trl_fixbn_protocol.md`.
 - `phase1_prereg/`: frozen Phase 1 pre-registration and provenance note.
 - `scripts/all_exported_code_snapshot/`: historical flattened-export snapshot; not the canonical execution surface.
 - `requirements.txt`: pinned audited Python dependency versions.
@@ -57,6 +57,23 @@ and `SWAG-Diag` label; they retain their historical sampling, FixBN, and cache
 protocols. Exact commands, paired seed-0 metrics, and artifact hashes are in
 `docs/swag_diag_protocol.md`; the audit runner is
 `diagnostics/swag_fixbn_ab_cifar100.py`.
+
+## TRL FixBN reproducibility boundary
+
+The reported five-seed TRL row used 25 posterior samples, 25 augmented FixBN
+batches, and rolling BatchNorm buffers. The canonical runner and CIFAR-100-C
+evaluator now default to independent-reset FixBN; historical rolling remains
+available explicitly. TRL ablation and diagnostic entry points expose and log
+their FixBN mode while retaining historical defaults where needed for reported
+row reproduction.
+
+The paired seed-0 audit exercises both an isolated beta-4 call and the complete
+validation-sweep-to-test pipeline. Reset is exactly invariant to reversed draw
+and beta-grid order, both modes select beta 4, and every metric difference is
+below its predeclared escalation threshold. The correction therefore does not
+require replacing the reported five-seed TRL row. Exact commands, metrics,
+limitations, and hashes are in `docs/trl_fixbn_protocol.md`; the runner is
+`diagnostics/trl_fixbn_ab_cifar100.py`.
 
 ## Reproduction boundary
 
