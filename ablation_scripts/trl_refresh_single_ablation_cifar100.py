@@ -179,6 +179,8 @@ def parse_args():
     p.add_argument("--tube-scale", type=float, default=4.0)
     p.add_argument("--n-samples", type=int, default=25)
     p.add_argument("--fixbn-batches", type=int, default=25)
+    p.add_argument("--fixbn-mode", choices=["rolling", "reset"], default="rolling",
+                   help="rolling reproduces the published ablation; reset is independent.")
     p.add_argument("--hvp-batches", type=int, default=5)
     p.add_argument("--eval-seed-offset", type=int, default=12345)
     p.add_argument("--modes", nargs="+", default=["single", "fresh"],
@@ -271,7 +273,10 @@ def main():
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t0 = time.perf_counter()
-        probs, targets = trl.predict(ts_loader, tr_aug, n_samples=args.n_samples, fix_bn_batches=args.fixbn_batches)
+        probs, targets = trl.predict(
+            ts_loader, tr_aug, n_samples=args.n_samples,
+            fix_bn_batches=args.fixbn_batches, fix_bn_mode=args.fixbn_mode,
+        )
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         wall = time.perf_counter() - t0
@@ -280,7 +285,10 @@ def main():
         auroc = None
         if args.include_ood:
             set_seed(cfg.seed + args.eval_seed_offset)
-            ood_probs, _ = trl.predict(ood_loader, tr_aug, n_samples=args.n_samples, fix_bn_batches=args.fixbn_batches)
+            ood_probs, _ = trl.predict(
+                ood_loader, tr_aug, n_samples=args.n_samples,
+                fix_bn_batches=args.fixbn_batches, fix_bn_mode=args.fixbn_mode,
+            )
             auroc = compute_auroc_from_msp(probs, ood_probs)
             del ood_probs
 
@@ -293,6 +301,7 @@ def main():
             "tube_scale": float(args.tube_scale),
             "n_samples": int(args.n_samples),
             "fixbn_batches": int(args.fixbn_batches),
+            "fixbn_mode": args.fixbn_mode,
             "k": int(trl.k),
             "n_spine_points": int(len(spine)),
             "fresh_max_points": int(args.fresh_max_points),

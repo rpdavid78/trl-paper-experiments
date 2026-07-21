@@ -179,7 +179,8 @@ def parse_args():
                    help="map ela lla trl deepens swag mcdo")
     p.add_argument("--results", default="results_iclr/cifar100c.jsonl")
     p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=2,
+                   help="Match the canonical clean-runner/cache provenance default.")
     p.add_argument("--corruptions", nargs="*", default=None)
     p.add_argument("--severities", nargs="+", type=int, default=[1, 2, 3, 4, 5])
     p.add_argument("--ckpt-dir", default=None)
@@ -187,6 +188,8 @@ def parse_args():
     p.add_argument("--trl-k-perp", type=int, default=30)
     p.add_argument("--trl-steps", type=int, default=40)
     p.add_argument("--trl-fixbn-batches", type=int, default=25)
+    p.add_argument("--trl-fixbn-mode", choices=["rolling", "reset"], default=None,
+                   help="TRL BN refresh; defaults to the corrected CFG mode.")
     p.add_argument("--trl-samples", type=int, default=25)
     p.add_argument("--swag-samples", type=int, default=None)
     p.add_argument("--swag-fixbn-batches", type=int, default=None)
@@ -212,6 +215,8 @@ def main():
     cfg.trl_k_perp = args.trl_k_perp
     cfg.trl_steps = args.trl_steps
     cfg.trl_fixbn_batches = args.trl_fixbn_batches
+    if args.trl_fixbn_mode is not None:
+        cfg.trl_fixbn_mode = args.trl_fixbn_mode
     cfg.trl_val_samples = args.trl_samples
     if args.swag_samples is not None:
         cfg.swag_samples = args.swag_samples
@@ -323,7 +328,8 @@ def main():
                     trl.reset_accounting()
                     with StageTimer(f"eval_{corr}_{sev}_trl", t):
                         probs, _ = trl.predict(loader, bn_loader_aug=tr_aug, n_samples=cfg.trl_val_samples,
-                                               fix_bn_batches=cfg.trl_fixbn_batches)
+                                               fix_bn_batches=cfg.trl_fixbn_batches,
+                                               fix_bn_mode=cfg.trl_fixbn_mode)
                     fixbn_overhead = trl.last_predict_fixbn_sec
                     t[f"eval_{corr}_{sev}_trl_fixbn_overhead"] = {"wall_sec": float(fixbn_overhead), "peak_vram_gb": 0.0}
                     label = "TRL"
@@ -365,6 +371,12 @@ def main():
                         "swag_fixbn_batches": int(cfg.swag_fixbn_batches),
                         "swag_fixbn_mode": cfg.swag_fixbn_mode,
                         "swag_stats": cfg.swag_stats,
+                    })
+                if method_norm == "trl":
+                    row.update({
+                        "trl_samples": int(cfg.trl_val_samples),
+                        "trl_fixbn_batches": int(cfg.trl_fixbn_batches),
+                        "trl_fixbn_mode": cfg.trl_fixbn_mode,
                     })
                 row.update(flatten_timings("time", t))
                 append_jsonl(args.results, row)
